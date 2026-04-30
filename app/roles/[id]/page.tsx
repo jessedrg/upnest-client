@@ -1,16 +1,20 @@
-import { fetchRole, fetchCandidates } from "@/lib/api";
+import { fetchRoleServer, fetchCandidatesServer } from "@/lib/api/server";
 import { notFound } from "next/navigation";
 import { RoleDetailClient } from "./client";
 
 export default async function RoleDetailPage({
   params,
 }: {
-  params: { id: string };
+  params: Promise<{ id: string }>;
 }) {
+  const { id } = await params;
+  
   const [role, candidates] = await Promise.all([
-    fetchRole(params.id),
-    fetchCandidates(params.id),
+    fetchRoleServer(id),
+    fetchCandidatesServer(id),
   ]);
+  
   if (!role) notFound();
+  
   return <RoleDetailClient role={role} initialCandidates={candidates} />;
 }

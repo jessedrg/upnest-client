@@ -24,7 +24,7 @@ export function DashboardClient({
           <h1 className="serif text-[22px] tracking-editorial">Dashboard</h1>
           <div className="flex items-center gap-2">
             <button className="btn btn-ghost">Filters</button>
-            <button className="btn btn-primary">+ New role</button>
+            <Link href="/submit" className="btn btn-primary">+ New role</Link>
           </div>
         </div>
         <TopProgress active={loading} />
@@ -44,8 +44,8 @@ export function DashboardClient({
 
 function Kpis({ stats }: { stats: Stats }) {
   const items = [
-    { label: "Earnings · This month", value: `$${stats.earningsThisMonth.toLocaleString()}` },
-    { label: "Earnings · All time", value: `$${stats.earningsAllTime.toLocaleString()}` },
+    { label: "Earnings - This month", value: `$${stats.earningsThisMonth.toLocaleString()}` },
+    { label: "Earnings - All time", value: `$${stats.earningsAllTime.toLocaleString()}` },
     { label: "Hires", value: stats.hires.toString() },
   ];
   return (
@@ -61,44 +61,56 @@ function Kpis({ stats }: { stats: Stats }) {
 }
 
 function RolesGrid({ roles }: { roles: Role[] }) {
+  // Filter to show only active roles
+  const activeRoles = roles.filter(r => r.status === "active").slice(0, 6);
+  
   return (
     <div>
       <div className="flex items-baseline justify-between mb-4">
         <h2 className="serif text-[28px] tracking-editorial">Active roles</h2>
         <Link href="/roles" className="text-[12px] text-t-3 hover:text-t-1">
-          View all →
+          View all ({roles.length})
         </Link>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {roles.map((r) => (
-          <Link
-            key={r.id}
-            href={`/roles/${r.id}`}
-            className="card p-5 hover:border-rule transition-colors"
-          >
-            <div className="flex items-center justify-between">
-              <span className="label">{r.company}</span>
-              {r.priority && (
-                <span className="text-[10px] mono text-rust uppercase tracking-widest">
-                  Priority
-                </span>
-              )}
-            </div>
-            <div className="serif mt-2 text-[24px] leading-tight">
-              {r.title}
-            </div>
-            <div className="text-xs text-t-3 mt-1">
-              {r.location} · {r.remote}
-            </div>
-            <div className="mt-4 flex items-baseline justify-between">
-              <span className="mono text-[11px] text-t-3">Bounty</span>
-              <span className="serif text-[22px]">
-                ${(r.bounty.amount / 1000).toFixed(0)}k
-              </span>
-            </div>
+      {activeRoles.length === 0 ? (
+        <div className="card p-8 text-center">
+          <p className="text-t-3">No active roles yet.</p>
+          <Link href="/submit" className="btn btn-primary mt-4 inline-block">
+            Submit your first role
           </Link>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {activeRoles.map((r) => (
+            <Link
+              key={r.id}
+              href={`/roles/${r.id}`}
+              className="card p-5 hover:border-rule transition-colors"
+            >
+              <div className="flex items-center justify-between">
+                <span className="label">{r.company_name || "Company"}</span>
+                {r.focus_this_week && (
+                  <span className="text-[10px] mono text-rust uppercase tracking-widest">
+                    Focus
+                  </span>
+                )}
+              </div>
+              <div className="serif mt-2 text-[24px] leading-tight">
+                {r.title}
+              </div>
+              <div className="text-xs text-t-3 mt-1">
+                {r.location || "Remote"} {r.remote_policy ? `- ${r.remote_policy}` : ""}
+              </div>
+              <div className="mt-4 flex items-baseline justify-between">
+                <span className="mono text-[11px] text-t-3">Bounty</span>
+                <span className="serif text-[22px]">
+                  {r.bounty ? `$${(r.bounty / 1000).toFixed(0)}k` : "TBD"}
+                </span>
+              </div>
+            </Link>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

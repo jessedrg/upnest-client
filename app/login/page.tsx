@@ -1,34 +1,49 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { signIn } from "next-auth/react";
+import { signIn } from "@/lib/auth";
 import { Aurora } from "@/components/editorial/aurora";
 import { Button, Input, Label } from "@/components/ui/controls";
 import { useToast } from "@/components/ui/toast";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const [pending, setPending] = React.useState(false);
+
+  // Show error toast if redirected with error
+  React.useEffect(() => {
+    const error = searchParams.get("error");
+    if (error) {
+      toast({ title: "Authentication error. Please try again.", tone: "error" });
+    }
+  }, [searchParams, toast]);
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setPending(true);
+    
     const fd = new FormData(e.currentTarget);
-    const res = await signIn("credentials", {
-      email: fd.get("email"),
-      password: fd.get("password"),
-      redirect: false,
-    });
-    setPending(false);
-    if (res?.error) {
-      toast({ title: "Couldn't sign in", tone: "error" });
-      return;
+    const email = fd.get("email") as string;
+    const password = fd.get("password") as string;
+
+    try {
+      await signIn(email, password);
+      toast({ title: "Welcome back", tone: "success" });
+      router.push("/dashboard");
+      router.refresh();
+    } catch (error) {
+      console.error("[v0] Login error:", error);
+      toast({ 
+        title: error instanceof Error ? error.message : "Couldn't sign in", 
+        tone: "error" 
+      });
+    } finally {
+      setPending(false);
     }
-    toast({ title: "Welcome back", tone: "success" });
-    router.push("/dashboard");
   }
 
   return (
@@ -37,7 +52,7 @@ export default function LoginPage() {
       <div className="relative z-10 w-full max-w-md">
         <div className="text-center mb-8">
           <div className="serif text-[44px] leading-none">Upnest</div>
-          <div className="label mt-2">Clients — sign in</div>
+          <div className="label mt-2">Sign in to your account</div>
         </div>
         <form
           onSubmit={onSubmit}
@@ -50,8 +65,8 @@ export default function LoginPage() {
               name="email"
               type="email"
               required
-              placeholder="alex@upnest.example"
-              defaultValue="alex@upnest.example"
+              placeholder="you@example.com"
+              autoComplete="email"
             />
           </div>
           <div>
@@ -61,7 +76,8 @@ export default function LoginPage() {
               name="password"
               type="password"
               required
-              defaultValue="anything"
+              placeholder="Your password"
+              autoComplete="current-password"
             />
           </div>
           <Button
@@ -69,12 +85,12 @@ export default function LoginPage() {
             className="w-full justify-center"
             disabled={pending}
           >
-            {pending ? "Signing in…" : "Sign in"}
+            {pending ? "Signing in..." : "Sign in"}
           </Button>
           <div className="text-center text-xs text-t-3">
-            New?{" "}
+            New here?{" "}
             <Link href="/signup" className="underline hover:text-t-1">
-              Apply to join
+              Create an account
             </Link>
           </div>
         </form>

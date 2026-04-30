@@ -1,75 +1,221 @@
-import { sleep, ApiClient } from "./_client";
-import { mockCandidates } from "@/lib/mock";
+import { getSupabaseClient } from "./_client";
 import {
-  CandidateSchema,
-  type Candidate,
-  type CandidateStage,
+  ApplicationSchema,
+  type Application,
+  type InterviewStatus,
 } from "@/lib/schemas";
 import { z } from "zod";
 
-export async function fetchCandidates(roleId?: string): Promise<Candidate[]> {
-  if (ApiClient.useMocks) {
-    await sleep(450);
-    const list = roleId
-      ? mockCandidates.filter((c) => c.roleId === roleId)
-      : mockCandidates;
-    return z.array(CandidateSchema).parse(list);
+/* ─── Reads ───────────────────────────────────────────────────────── */
+export async function fetchCandidates(roleId?: string): Promise<Application[]> {
+  const supabase = getSupabaseClient();
+  
+  let query = supabase
+    .from("applications")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (roleId) {
+    query = query.eq("role_id", roleId);
   }
-  const path = roleId ? `/v1/candidates?roleId=${roleId}` : "/v1/candidates";
-  return z.array(CandidateSchema).parse(await ApiClient.get<unknown>(path));
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("[v0] Error fetching candidates:", error);
+    throw new Error(`Failed to fetch candidates: ${error.message}`);
+  }
+
+  return z.array(ApplicationSchema).parse(data || []);
 }
 
-export async function fetchCandidate(id: string): Promise<Candidate | null> {
-  if (ApiClient.useMocks) {
-    await sleep(300);
-    const c = mockCandidates.find((x) => x.id === id);
-    return c ? CandidateSchema.parse(c) : null;
+export async function fetchCandidate(id: string): Promise<Application | null> {
+  const supabase = getSupabaseClient();
+  
+  const { data, error } = await supabase
+    .from("applications")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error) {
+    if (error.code === "PGRST116") {
+      return null;
+    }
+    console.error("[v0] Error fetching candidate:", error);
+    throw new Error(`Failed to fetch candidate: ${error.message}`);
   }
-  return CandidateSchema.parse(
-    await ApiClient.get<unknown>(`/v1/candidates/${id}`),
-  );
+
+  return data ? ApplicationSchema.parse(data) : null;
 }
 
+export async function fetchCandidatesByStatus(
+  status: InterviewStatus,
+  roleId?: string
+): Promise<Application[]> {
+  const supabase = getSupabaseClient();
+  
+  let query = supabase
+    .from("applications")
+    .select("*")
+    .eq("interview_status", status)
+    .order("created_at", { ascending: false });
+
+  if (roleId) {
+    query = query.eq("role_id", roleId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("[v0] Error fetching candidates by status:", error);
+    throw new Error(`Failed to fetch candidates: ${error.message}`);
+  }
+
+  return z.array(ApplicationSchema).parse(data || []);
+}
+
+export async function fetchCandidatesForRecruiter(
+  recruiterId: string,
+  roleId?: string
+): Promise<Application[]> {
+  const supabase = getSupabaseClient();
+  
+  let query = supabase
+    .from("applications")
+    .select("*")
+    .eq("sourced_by", recruiterId)
+    .order("created_at", { ascending: false });
+
+  if (roleId) {
+    query = query.eq("role_id", roleId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("[v0] Error fetching candidates for recruiter:", error);
+    throw new Error(`Failed to fetch candidates: ${error.message}`);
+  }
+
+  return z.array(ApplicationSchema).parse(data || []);
+}
+
+/* ─── Mutations ───────────────────────────────────────────────────── */
 export const SubmitCandidateInput = z.object({
-  roleId: z.string(),
-  name: z.string().min(2),
-  title: z.string(),
-  email: z.string().email().optional(),
-  linkedin: z.string().url().optional(),
+  role_id: z.string().uuid(),
+  candidate_name: z.string().min(2),
+  candidate_email: z.string().email(),
+  candidate_phone: z.string().optional(),
+  linkedin_url: z.string().url().optional(),
+  resume_url: z.string().url().optional(),
+  cover_letter: z.string().optional(),
   notes: z.string().optional(),
 });
 export type SubmitCandidateInput = z.infer<typeof SubmitCandidateInput>;
 
 export async function submitCandidate(
   input: SubmitCandidateInput,
-): Promise<Candidate> {
+): Promise<Application> {
+  const supabase = getSupabaseClient();
   const parsed = SubmitCandidateInput.parse(input);
-  if (ApiClient.useMocks) {
-    await sleep(700);
-    return CandidateSchema.parse({
-      id: `c_${Date.now()}`,
-      ...parsed,
-      stage: "submitted",
-      submittedBy: "u_me",
-      submittedAt: new Date().toISOString(),
-    });
+
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const { data, error } = await supabase
+    .from("applications")
+    .insert({
+      role_id: parsed.role_id,
+      candidate_name: parsed.candidate_name,
+      candidate_email: parsed.candidate_email,
+      candidate_phone: parsed.candidate_phone,
+      linkedin_url: parsed.linkedin_url,
+      resume_url: parsed.resume_url,
+      cover_letter: parsed.cover_letter,
+      status: "pending",
+      interview_status: "new",
+      sourced_by: user?.id,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[v0] Error submitting candidate:", error);
+    throw new Error(`Failed to submit candidate: ${error.message}`);
   }
-  return CandidateSchema.parse(
-    await ApiClient.post("/v1/candidates", parsed),
-  );
+
+  return ApplicationSchema.parse(data);
 }
 
 export async function moveCandidateStage(
   id: string,
-  stage: CandidateStage,
-): Promise<Candidate> {
-  if (ApiClient.useMocks) {
-    await sleep(300);
-    const c = mockCandidates.find((x) => x.id === id);
-    if (!c) throw new Error("not found");
-    return CandidateSchema.parse({ ...c, stage });
+  stage: InterviewStatus,
+): Promise<Application> {
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("applications")
+    .update({ 
+      interview_status: stage, 
+      status_entered_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[v0] Error moving candidate stage:", error);
+    throw new Error(`Failed to update candidate stage: ${error.message}`);
   }
-  return CandidateSchema.parse(
-    await ApiClient.post(`/v1/candidates/${id}/stage`, { stage }),
-  );
+
+  return ApplicationSchema.parse(data);
+}
+
+export async function updateCandidate(
+  id: string,
+  updates: Partial<Application>,
+): Promise<Application> {
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("applications")
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[v0] Error updating candidate:", error);
+    throw new Error(`Failed to update candidate: ${error.message}`);
+  }
+
+  return ApplicationSchema.parse(data);
+}
+
+export async function rejectCandidate(
+  id: string,
+  reason?: string,
+): Promise<Application> {
+  const supabase = getSupabaseClient();
+
+  const { data, error } = await supabase
+    .from("applications")
+    .update({ 
+      interview_status: "rejected",
+      status: "rejected",
+      rejection_reason: reason,
+      status_entered_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[v0] Error rejecting candidate:", error);
+    throw new Error(`Failed to reject candidate: ${error.message}`);
+  }
+
+  return ApplicationSchema.parse(data);
 }

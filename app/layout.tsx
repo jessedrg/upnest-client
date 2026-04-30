@@ -24,8 +24,8 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Upnest · Clients",
-  description: "Client console — see who's working your roles.",
+  title: "Upnest",
+  description: "Client console - see who is working your roles.",
 };
 
 export default function RootLayout({

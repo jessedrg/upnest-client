@@ -2,8 +2,9 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { clsx } from "clsx";
+import { signOut } from "@/lib/auth";
 import {
   HomeIcon,
   RolesIcon,
@@ -28,11 +29,29 @@ const NAV = [
 
 export function SideNav() {
   const path = usePathname();
+  const router = useRouter();
+  const [signingOut, setSigningOut] = React.useState(false);
+
+  async function handleSignOut() {
+    setSigningOut(true);
+    try {
+      await signOut();
+      router.push("/login");
+      router.refresh();
+    } catch (error) {
+      console.error("[v0] Sign out error:", error);
+    } finally {
+      setSigningOut(false);
+    }
+  }
+
   return (
     <aside className="hidden md:flex w-[220px] flex-col border-r border-rule-2 bg-paper-soft py-6 px-3">
       <div className="px-3 mb-6">
-        <div className="serif text-[28px] leading-none">Upnest</div>
-        <div className="label mt-1">Clients</div>
+        <Link href="/dashboard">
+          <div className="serif text-[28px] leading-none">Upnest</div>
+          <div className="label mt-1">Clients</div>
+        </Link>
       </div>
       <nav className="flex flex-col gap-1">
         {NAV.map(({ href, label, icon: Icon }) => {
@@ -55,9 +74,13 @@ export function SideNav() {
         })}
       </nav>
       <div className="mt-auto px-3">
-        <button className="flex items-center gap-2 text-[12px] text-t-3 hover:text-t-1">
+        <button 
+          onClick={handleSignOut}
+          disabled={signingOut}
+          className="flex items-center gap-2 text-[12px] text-t-3 hover:text-t-1 disabled:opacity-50"
+        >
           <LogoutIcon size={14} />
-          Sign out
+          {signingOut ? "Signing out..." : "Sign out"}
         </button>
       </div>
     </aside>

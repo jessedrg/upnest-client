@@ -1,47 +1,130 @@
-import NextAuth, { type NextAuthConfig } from "next-auth";
-import Credentials from "next-auth/providers/credentials";
-import { z } from "zod";
+import { createClient } from "@/lib/supabase/client";
 
-const Login = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-});
+/**
+ * Sign in with email and password
+ */
+export async function signIn(email: string, password: string) {
+  const supabase = createClient();
+  
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password,
+  });
 
-export const authConfig: NextAuthConfig = {
-  pages: { signIn: "/login" },
-  session: { strategy: "jwt" },
-  providers: [
-    Credentials({
-      credentials: {
-        email: { label: "Email", type: "email" },
-        password: { label: "Password", type: "password" },
-      },
-      async authorize(creds) {
-        const parsed = Login.safeParse(creds);
-        if (!parsed.success) return null;
-        // STUB — replace with real auth
-        return {
-          id: "u_me",
-          name: "Alex Reyes",
-          email: parsed.data.email,
-        };
-      },
-    }),
-  ],
-  callbacks: {
-    authorized({ auth, request: { nextUrl } }) {
-      const loggedIn = !!auth?.user;
-      const onAuthPage =
-        nextUrl.pathname.startsWith("/login") ||
-        nextUrl.pathname.startsWith("/signup");
-      if (loggedIn && onAuthPage) {
-        return Response.redirect(new URL("/dashboard", nextUrl));
-      }
-      const isApp = nextUrl.pathname.startsWith("/(app)");
-      // Permissive in dev: allow everything by default
-      return true;
+  if (error) {
+    console.error("[v0] Sign in error:", error);
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+/**
+ * Sign up with email and password
+ */
+export async function signUp(
+  email: string, 
+  password: string,
+  metadata?: {
+    full_name?: string;
+    first_name?: string;
+    last_name?: string;
+  }
+) {
+  const supabase = createClient();
+  
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ??
+        `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/callback`,
+      data: metadata,
     },
-  },
-};
+  });
 
-export const { handlers, auth, signIn, signOut } = NextAuth(authConfig);
+  if (error) {
+    console.error("[v0] Sign up error:", error);
+    throw new Error(error.message);
+  }
+
+  return data;
+}
+
+/**
+ * Sign out the current user
+ */
+export async function signOut() {
+  const supabase = createClient();
+  
+  const { error } = await supabase.auth.signOut();
+
+  if (error) {
+    console.error("[v0] Sign out error:", error);
+    throw new Error(error.message);
+  }
+}
+
+/**
+ * Get the current session
+ */
+export async function getSession() {
+  const supabase = createClient();
+  
+  const { data: { session }, error } = await supabase.auth.getSession();
+
+  if (error) {
+    console.error("[v0] Get session error:", error);
+    return null;
+  }
+
+  return session;
+}
+
+/**
+ * Get the current user
+ */
+export async function getUser() {
+  const supabase = createClient();
+  
+  const { data: { user }, error } = await supabase.auth.getUser();
+
+  if (error) {
+    console.error("[v0] Get user error:", error);
+    return null;
+  }
+
+  return user;
+}
+
+/**
+ * Request password reset email
+ */
+export async function resetPassword(email: string) {
+  const supabase = createClient();
+  
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${typeof window !== 'undefined' ? window.location.origin : ''}/auth/callback?next=/settings`,
+  });
+
+  if (error) {
+    console.error("[v0] Reset password error:", error);
+    throw new Error(error.message);
+  }
+}
+
+/**
+ * Update user password
+ */
+export async function updatePassword(newPassword: string) {
+  const supabase = createClient();
+  
+  const { error } = await supabase.auth.updateUser({
+    password: newPassword,
+  });
+
+  if (error) {
+    console.error("[v0] Update password error:", error);
+    throw new Error(error.message);
+  }
+}

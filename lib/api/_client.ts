@@ -1,42 +1,15 @@
 /**
- * Shared fetch wrapper. Edit ONE file when wiring real backends.
- *
- * Today: returns mocks if NEXT_PUBLIC_USE_MOCKS=true (default in dev).
- * Real:  point at API_URL, attach auth header, throw on !ok.
+ * Supabase client wrapper for API operations.
+ * All data fetching now goes through Supabase.
  */
 
-const USE_MOCKS = process.env.NEXT_PUBLIC_USE_MOCKS !== "false";
-const BASE = process.env.API_URL ?? "";
+import { createClient } from "@/lib/supabase/client";
 
-export const ApiClient = {
-  useMocks: USE_MOCKS,
+// For browser-side operations
+export function getSupabaseClient() {
+  return createClient();
+}
 
-  async get<T>(path: string, init?: RequestInit): Promise<T> {
-    if (USE_MOCKS) throw new Error("Real fetch called while mocks are on");
-    const res = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        // Authorization: `Bearer ${await getToken()}`, // wire NextAuth
-        ...init?.headers,
-      },
-      next: { revalidate: 30 },
-    });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    return res.json();
-  },
-
-  async post<T>(path: string, body: unknown): Promise<T> {
-    if (USE_MOCKS) throw new Error("Real fetch called while mocks are on");
-    const res = await fetch(`${BASE}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-    return res.json();
-  },
-};
-
+// Helper for artificial delay in development (optional)
 export const sleep = (ms: number) =>
   new Promise<void>((r) => setTimeout(r, ms));
