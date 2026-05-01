@@ -1,91 +1,90 @@
 'use client';
 
-// ClientSignupView — TSX port of public/src/ClientSignupView.jsx.
-// Three-step (1) form (2) analyzing (3) parsed-confirm flow with a brand panel.
+// ClientSignupView — Real signup flow without mock crawl.
+// Two-step: (1) form (2) success/pending message.
 
 import * as React from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { emitToast } from './Toast';
 
-type LinkKind = 'website' | 'linkedin';
 type Form = {
-  firstName: string; lastName: string; email: string; password: string;
-  website: string; linkedin: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  password: string;
+  companyName: string;
+  website: string;
+  industry: string;
+  companySize: string;
 };
-type Profile = {
-  name: string; logo: string; logoColor: string; tagline: string;
-  industry: string; hq: string; size: string;
-  headcount: string; funding: string; stage: string; founded: string;
-  stack: string[]; openings: { title: string; dept: string }[];
-};
+
+const INDUSTRIES = [
+  'Technology',
+  'Fintech',
+  'Healthcare',
+  'E-commerce',
+  'SaaS',
+  'Enterprise Software',
+  'Consumer',
+  'Other',
+];
+
+const COMPANY_SIZES = [
+  '1-10',
+  '11-50',
+  '51-200',
+  '201-500',
+  '501-1000',
+  '1000+',
+];
 
 export function ClientSignupView({ onEnter, onBackToLogin }: {
   onEnter: () => void;
   onBackToLogin: () => void;
 }) {
-  const [step, setStep] = React.useState<1 | 2 | 3>(1);
-  const [linkKind, setLinkKind] = React.useState<LinkKind>('website');
+  const [step, setStep] = React.useState<1 | 2>(1);
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [f, setF] = React.useState<Form>({
-    firstName: 'Catherine', lastName: 'Long',
-    email: 'catherine@ramp.com', password: '',
-    website: 'https://ramp.com',
-    linkedin: 'https://linkedin.com/company/ramp',
+    firstName: '',
+    lastName: '',
+    email: '',
+    password: '',
+    companyName: '',
+    website: '',
+    industry: 'Technology',
+    companySize: '11-50',
   });
-  const [profile, setProfile] = React.useState<Profile | null>(null);
-  const [analyzeBeats, setAnalyzeBeats] = React.useState(0);
+
   const set = <K extends keyof Form>(k: K, v: Form[K]) =>
     setF(prev => ({ ...prev, [k]: v }));
 
-  const url = linkKind === 'website' ? f.website : f.linkedin;
-  const looksValid = linkKind === 'website'
-    ? /^https?:\/\/.+\..+/.test(f.website || '')
-    : /linkedin\.com\/company\//i.test(f.linkedin || '');
-  const canSubmit = !!(f.firstName && f.lastName && f.email && f.password && looksValid);
+  const canSubmit = !!(
+    f.firstName.trim() &&
+    f.lastName.trim() &&
+    f.email.trim() &&
+    f.password.length >= 6 &&
+    f.companyName.trim()
+  );
 
-  React.useEffect(() => {
-    if (step !== 2) return;
-    setAnalyzeBeats(0);
-    const beats = [500, 1200, 1900, 2600, 3300];
-    const timers = beats.map((at, i) => window.setTimeout(() => setAnalyzeBeats(i + 1), at));
-    const finish = window.setTimeout(() => {
-      setProfile(mockPullCompany(f, linkKind));
-      setStep(3);
-      emitToast({
-        kind: 'success', title: 'Company synced',
-        body: 'We pulled your company profile. Take a look before continuing.',
-      });
-    }, 3800);
-    return () => { timers.forEach(clearTimeout); clearTimeout(finish); };
-  }, [step, f, linkKind]);
-
-  const submitForm = (e: React.FormEvent) => {
+  const submitForm = async (e: React.FormEvent) => {
     e.preventDefault();
+    
     if (!canSubmit) {
       emitToast({
-        kind: 'error', title: 'Almost there',
-        body: looksValid
-          ? 'Fill in every field to continue.'
-          : (linkKind === 'website' ? 'Enter a valid website URL.' : 'Enter a valid linkedin.com/company/… URL.'),
+        kind: 'error',
+        title: 'Missing fields',
+        body: f.password.length < 6 
+          ? 'Password must be at least 6 characters.' 
+          : 'Please fill in all required fields.',
       });
       return;
     }
-    setStep(2);
-    emitToast({
-      kind: 'info',
-      title: linkKind === 'website' ? 'Crawling website' : 'Analyzing LinkedIn',
-      body: 'Hang on while we read your company profile.',
-    });
-  };
 
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
-
-  const finish = async () => {
-    if (!profile) return;
     setIsSubmitting(true);
-    
+
     try {
       const supabase = createClient();
-      
+
       // 1. Sign up the user with Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: f.email,
@@ -100,27 +99,27 @@ export function ClientSignupView({ onEnter, onBackToLogin }: {
           },
         },
       });
-      
+
       if (authError) throw authError;
       if (!authData.user) throw new Error('No user created');
-      
-      // 2. Create the client organization
+
+      // 2. Create the client organization (status defaults to 'pending')
       const { data: orgData, error: orgError } = await supabase
         .from('client_organizations')
         .insert({
-          name: profile.name,
-          website: linkKind === 'website' ? f.website : null,
-          industry: profile.industry,
-          company_size: profile.size,
-          description: profile.tagline,
+          name: f.companyName.trim(),
+          website: f.website.trim() || null,
+          industry: f.industry,
+          company_size: f.companySize,
           contact_name: `${f.firstName} ${f.lastName}`,
           contact_email: f.email,
+          // status defaults to 'pending' in the database
         })
         .select()
         .single();
-      
+
       if (orgError) throw orgError;
-      
+
       // 3. Create user profile with client role
       const { error: profileError } = await supabase
         .from('user_profiles')
@@ -131,38 +130,39 @@ export function ClientSignupView({ onEnter, onBackToLogin }: {
           full_name: `${f.firstName} ${f.lastName}`,
           email: f.email,
           role: 'client',
-          status: 'pending', // Pending until approved by admin
+          status: 'pending',
         });
-      
+
       if (profileError) {
-        console.error('[v0] Profile error:', profileError);
-        // Profile might be created by trigger, continue
+        // Profile might be created by trigger, log but continue
+        console.error('[v0] Profile creation note:', profileError.message);
       }
-      
-      // 4. Link user to client organization
+
+      // 4. Link user to client organization as owner
       const { error: linkError } = await supabase
         .from('client_users')
         .insert({
           user_id: authData.user.id,
           organization_id: orgData.id,
-          role: 'owner', // First user is owner
+          role: 'owner',
         });
-      
+
       if (linkError) throw linkError;
-      
-      emitToast({ 
-        kind: 'success', 
-        title: 'Welcome to upnest', 
-        body: 'Your request has been submitted. Check your email to verify your account.' 
+
+      // Success - show pending step
+      setStep(2);
+      emitToast({
+        kind: 'success',
+        title: 'Request submitted',
+        body: 'Check your email to verify your account.',
       });
-      setTimeout(() => onEnter(), 500);
-      
+
     } catch (error: any) {
       console.error('[v0] Signup error:', error);
-      emitToast({ 
-        kind: 'error', 
-        title: 'Signup failed', 
-        body: error?.message || 'Something went wrong. Please try again.' 
+      emitToast({
+        kind: 'error',
+        title: 'Signup failed',
+        body: error?.message || 'Something went wrong. Please try again.',
       });
     } finally {
       setIsSubmitting(false);
@@ -191,17 +191,14 @@ export function ClientSignupView({ onEnter, onBackToLogin }: {
 
         <div className="rise-in d2" style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 28 }}>
           <span className="mono" style={{ fontSize: 10, letterSpacing: '.2em', color: 'var(--t-3)' }}>
-            CHAPTER {String(step).padStart(2, '0')} — {step === 1 ? 'YOU & COMPANY' : step === 2 ? 'ANALYSIS' : 'CONFIRM'}
+            {step === 1 ? 'REQUEST ACCESS' : 'PENDING APPROVAL'}
           </span>
           <div style={{ flex: 1, height: 1, background: 'var(--hair)' }}>
             <div style={{
               height: '100%', background: 'var(--ink)',
-              width: `${(step / 3) * 100}%`, transition: 'width .6s var(--ease)',
+              width: step === 1 ? '50%' : '100%', transition: 'width .6s var(--ease)',
             }}/>
           </div>
-          <span className="mono num" style={{ fontSize: 10, letterSpacing: '.2em', color: 'var(--t-3)' }}>
-            {step} / 3
-          </span>
         </div>
 
         <div style={{
@@ -216,110 +213,262 @@ export function ClientSignupView({ onEnter, onBackToLogin }: {
             <h1 className="serif" style={{
               fontSize: 60, lineHeight: .95, letterSpacing: '-0.035em', margin: 0,
             }}>
-              {step === 1 && (<>Request<br/><span style={{ fontStyle: 'italic' }}>access.</span></>)}
-              {step === 2 && (<>Reading your<br/><span style={{ fontStyle: 'italic' }}>company.</span></>)}
-              {step === 3 && (<>Is this<br/><span style={{ fontStyle: 'italic' }}>your team?</span></>)}
+              {step === 1 ? (
+                <>Request<br/><span style={{ fontStyle: 'italic' }}>access.</span></>
+              ) : (
+                <>Almost<br/><span style={{ fontStyle: 'italic' }}>there.</span></>
+              )}
             </h1>
             <div style={{
               fontSize: 15, color: 'var(--t-3)', marginTop: 14, fontStyle: 'italic',
               fontFamily: 'var(--serif)', maxWidth: 440,
             }}>
-              {step === 1 && "Tell us who you are and where to find your company. We'll pre-fill the rest."}
-              {step === 2 && 'Pulling team size, stack, recent roles, and funding signals.'}
-              {step === 3 && 'Confirm what we found, or edit. You can always change this later in Settings.'}
+              {step === 1 
+                ? "Tell us about you and your company. We'll review your request within 24-48 hours."
+                : "Your request is being reviewed. You'll receive an email once approved."}
             </div>
           </div>
 
           <div key={step} className="rise-in d4" style={{ animationDuration: '.5s' }}>
-            {step === 1 && (
-              <form onSubmit={submitForm} style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 22 }}>
+            {step === 1 ? (
+              <form onSubmit={submitForm} style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                {/* Name row */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
                   <div className="ed-group">
-                    <label className="ed-label">First name</label>
-                    <input className="ed-field" value={f.firstName} onChange={e => set('firstName', e.target.value)} placeholder="Catherine"/>
+                    <label className="ed-label">First name *</label>
+                    <input 
+                      className="ed-field" 
+                      value={f.firstName} 
+                      onChange={e => set('firstName', e.target.value)} 
+                      placeholder="Catherine"
+                      required
+                    />
                   </div>
                   <div className="ed-group">
-                    <label className="ed-label">Last name</label>
-                    <input className="ed-field" value={f.lastName} onChange={e => set('lastName', e.target.value)} placeholder="Long"/>
-                  </div>
-                </div>
-                <div className="ed-group">
-                  <label className="ed-label">Work email</label>
-                  <input className="ed-field" value={f.email} onChange={e => set('email', e.target.value)} placeholder="you@company.com"/>
-                </div>
-                <div className="ed-group">
-                  <label className="ed-label">Password</label>
-                  <input className="ed-field" type="password" value={f.password} onChange={e => set('password', e.target.value)} placeholder="••••••••••••"/>
-                </div>
-
-                <div>
-                  <label className="ed-label" style={{ marginBottom: 8 }}>How should we find your company?</label>
-                  <div style={{
-                    display: 'flex', gap: 0,
-                    border: '1px solid var(--hair-strong)', borderRadius: 999,
-                    padding: 3, marginBottom: 14, width: 'fit-content',
-                  }}>
-                    {([{ k: 'website', l: 'Website URL' }, { k: 'linkedin', l: 'LinkedIn URL' }] as const).map(o => (
-                      <button type="button" key={o.k} onClick={() => setLinkKind(o.k as LinkKind)} style={{
-                        appearance: 'none', border: 0, cursor: 'pointer',
-                        background: linkKind === o.k ? 'var(--ink)' : 'transparent',
-                        color: linkKind === o.k ? '#fff' : 'var(--t-3)',
-                        padding: '8px 18px', borderRadius: 999,
-                        fontFamily: 'var(--serif)', fontSize: 14,
-                        fontStyle: linkKind === o.k ? 'italic' : 'normal',
-                        transition: 'background .2s, color .2s',
-                      }}>{o.l}</button>
-                    ))}
-                  </div>
-                  <div className="ed-group">
-                    {linkKind === 'website' ? (
-                      <input className="ed-field" value={f.website} onChange={e => set('website', e.target.value)} placeholder="https://yourcompany.com"/>
-                    ) : (
-                      <input className="ed-field" value={f.linkedin} onChange={e => set('linkedin', e.target.value)} placeholder="https://linkedin.com/company/your-company"/>
-                    )}
-                    <div className="mono" style={{
-                      fontSize: 10, letterSpacing: '.16em',
-                      color: looksValid ? 'var(--plum-700)' : 'var(--t-4)', marginTop: 8,
-                    }}>
-                      {looksValid
-                        ? (linkKind === 'website' ? "— WE'LL CRAWL THIS SITE" : "— WE'LL ANALYZE THIS COMPANY")
-                        : (linkKind === 'website' ? 'PASTE A FULL HTTPS:// URL' : 'PASTE A LINKEDIN.COM/COMPANY/… URL')}
-                    </div>
+                    <label className="ed-label">Last name *</label>
+                    <input 
+                      className="ed-field" 
+                      value={f.lastName} 
+                      onChange={e => set('lastName', e.target.value)} 
+                      placeholder="Long"
+                      required
+                    />
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: 12, marginTop: 8, alignItems: 'center' }}>
-                  <button type="submit" disabled={!canSubmit} style={{
-                    flex: 1, appearance: 'none', border: 0,
-                    cursor: canSubmit ? 'pointer' : 'not-allowed',
-                    background: 'var(--ink)', color: 'var(--paper)',
-                    padding: '16px', borderRadius: 999,
-                    fontFamily: 'var(--serif)', fontSize: 18, fontStyle: 'italic',
-                    letterSpacing: '-0.005em',
-                    opacity: canSubmit ? 1 : .4, transition: 'opacity .2s',
-                  }}>
-                    {linkKind === 'website' ? 'Crawl my company' : 'Analyze my company'}{' '}
+                {/* Email */}
+                <div className="ed-group">
+                  <label className="ed-label">Work email *</label>
+                  <input 
+                    className="ed-field" 
+                    type="email"
+                    value={f.email} 
+                    onChange={e => set('email', e.target.value)} 
+                    placeholder="you@company.com"
+                    required
+                  />
+                </div>
+
+                {/* Password */}
+                <div className="ed-group">
+                  <label className="ed-label">Password * (min 6 characters)</label>
+                  <input 
+                    className="ed-field" 
+                    type="password" 
+                    value={f.password} 
+                    onChange={e => set('password', e.target.value)} 
+                    placeholder="••••••••••••"
+                    minLength={6}
+                    required
+                  />
+                </div>
+
+                {/* Company name */}
+                <div className="ed-group">
+                  <label className="ed-label">Company name *</label>
+                  <input 
+                    className="ed-field" 
+                    value={f.companyName} 
+                    onChange={e => set('companyName', e.target.value)} 
+                    placeholder="Acme Inc."
+                    required
+                  />
+                </div>
+
+                {/* Website (optional) */}
+                <div className="ed-group">
+                  <label className="ed-label">Company website (optional)</label>
+                  <input 
+                    className="ed-field" 
+                    value={f.website} 
+                    onChange={e => set('website', e.target.value)} 
+                    placeholder="https://yourcompany.com"
+                  />
+                </div>
+
+                {/* Industry & Size row */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18 }}>
+                  <div className="ed-group">
+                    <label className="ed-label">Industry</label>
+                    <select 
+                      className="ed-field" 
+                      value={f.industry} 
+                      onChange={e => set('industry', e.target.value)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {INDUSTRIES.map(i => (
+                        <option key={i} value={i}>{i}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="ed-group">
+                    <label className="ed-label">Company size</label>
+                    <select 
+                      className="ed-field" 
+                      value={f.companySize} 
+                      onChange={e => set('companySize', e.target.value)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      {COMPANY_SIZES.map(s => (
+                        <option key={s} value={s}>{s} employees</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Submit button */}
+                <div style={{ marginTop: 8 }}>
+                  <button 
+                    type="submit" 
+                    disabled={!canSubmit || isSubmitting} 
+                    style={{
+                      width: '100%',
+                      appearance: 'none', 
+                      border: 0,
+                      cursor: canSubmit && !isSubmitting ? 'pointer' : 'not-allowed',
+                      background: 'var(--ink)', 
+                      color: 'var(--paper)',
+                      padding: '16px', 
+                      borderRadius: 999,
+                      fontFamily: 'var(--serif)', 
+                      fontSize: 18, 
+                      fontStyle: 'italic',
+                      letterSpacing: '-0.005em',
+                      opacity: canSubmit && !isSubmitting ? 1 : 0.5,
+                      transition: 'opacity .2s',
+                    }}
+                  >
+                    {isSubmitting ? 'Submitting...' : 'Request access'}{' '}
                     <span style={{ fontStyle: 'normal' }}>→</span>
                   </button>
                 </div>
               </form>
+            ) : (
+              /* Step 2: Pending confirmation */
+              <div style={{
+                border: '1px solid var(--hair-strong)',
+                borderRadius: 14,
+                background: '#fff',
+                padding: '32px',
+              }}>
+                <div style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: '50%',
+                  background: 'var(--plum-100)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  marginBottom: 24,
+                }}>
+                  <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--plum-700)" strokeWidth="2">
+                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                    <polyline points="22 4 12 14.01 9 11.01"/>
+                  </svg>
+                </div>
+
+                <h2 className="serif" style={{
+                  fontSize: 28,
+                  fontStyle: 'italic',
+                  margin: '0 0 12px 0',
+                  letterSpacing: '-0.02em',
+                }}>
+                  Request submitted for {f.companyName}
+                </h2>
+
+                <p style={{
+                  color: 'var(--t-3)',
+                  fontSize: 15,
+                  lineHeight: 1.6,
+                  margin: '0 0 24px 0',
+                }}>
+                  We&apos;ve sent a verification email to <strong>{f.email}</strong>. 
+                  Please verify your email, then our team will review your request within 24-48 hours.
+                </p>
+
+                <div style={{
+                  background: 'var(--cream-100)',
+                  border: '1px solid var(--hair)',
+                  borderRadius: 8,
+                  padding: 20,
+                  marginBottom: 24,
+                }}>
+                  <div className="mono" style={{
+                    fontSize: 10,
+                    letterSpacing: '.18em',
+                    color: 'var(--t-4)',
+                    marginBottom: 12,
+                  }}>
+                    WHAT HAPPENS NEXT
+                  </div>
+                  <ul style={{
+                    margin: 0,
+                    padding: '0 0 0 18px',
+                    fontSize: 14,
+                    color: 'var(--t-2)',
+                    lineHeight: 1.8,
+                  }}>
+                    <li>Check your inbox and verify your email</li>
+                    <li>Our team reviews your company (24-48 hours)</li>
+                    <li>You&apos;ll receive an approval email</li>
+                    <li>Sign in and start hiring</li>
+                  </ul>
+                </div>
+
+                <button
+                  onClick={onBackToLogin}
+                  style={{
+                    width: '100%',
+                    appearance: 'none',
+                    border: '1px solid var(--hair-strong)',
+                    background: 'transparent',
+                    padding: '14px',
+                    borderRadius: 999,
+                    cursor: 'pointer',
+                    fontFamily: 'var(--serif)',
+                    fontSize: 16,
+                    color: 'var(--t-1)',
+                  }}
+                >
+                  ← Back to sign in
+                </button>
+              </div>
             )}
-
-            {step === 2 && <CompanyAnalyzingPanel beats={analyzeBeats} url={url} kind={linkKind}/>}
-            {step === 3 && profile && <ParsedCompanyPanel profile={profile} onFinish={finish} isSubmitting={isSubmitting}/>}
           </div>
 
-          <div className="rise-in d5" style={{
-            textAlign: 'center', marginTop: 24, color: 'var(--t-3)', fontSize: 13,
-          }}>
-            Already have an account?{' '}
-            <a style={{
-              color: 'var(--t-1)', fontStyle: 'italic', fontFamily: 'var(--serif)',
-              fontSize: 15, textDecoration: 'none', borderBottom: '1px solid var(--ink)',
-            }} href="#" onClick={e => { e.preventDefault(); onBackToLogin(); }}>
-              Sign in
-            </a>
-          </div>
+          {step === 1 && (
+            <div className="rise-in d5" style={{
+              textAlign: 'center', marginTop: 24, color: 'var(--t-3)', fontSize: 13,
+            }}>
+              Already have an account?{' '}
+              <a style={{
+                color: 'var(--t-1)', fontStyle: 'italic', fontFamily: 'var(--serif)',
+                fontSize: 15, textDecoration: 'none', borderBottom: '1px solid var(--ink)',
+              }} href="#" onClick={e => { e.preventDefault(); onBackToLogin(); }}>
+                Sign in
+              </a>
+            </div>
+          )}
         </div>
 
         <footer className="rise-in d5" style={{
@@ -374,195 +523,4 @@ export function ClientSignupView({ onEnter, onBackToLogin }: {
       </div>
     </div>
   );
-}
-
-function CompanyAnalyzingPanel({ beats, url, kind }: {
-  beats: number; url: string; kind: LinkKind;
-}) {
-  const lines = [
-    kind === 'website' ? 'Crawling homepage' : 'Resolving company page',
-    'Reading about, team & jobs',
-    'Identifying funding & headcount',
-    'Matching tech stack & industry',
-    'Done',
-  ];
-  return (
-    <div style={{
-      border: '1px solid var(--hair-strong)', borderRadius: 14, padding: '26px 28px',
-      background: '#fff', position: 'relative', overflow: 'hidden',
-    }}>
-      <div style={{
-        position: 'absolute', inset: 0,
-        background: 'repeating-linear-gradient(0deg, transparent 0 3px, rgba(120,75,140,.04) 3px 4px)',
-        pointerEvents: 'none',
-      }}/>
-      <div className="mono" style={{ fontSize: 10, letterSpacing: '.22em', color: 'var(--plum-700)', marginBottom: 14 }}>
-        — ANALYZING COMPANY
-      </div>
-      <div className="mono" style={{ fontSize: 11, color: 'var(--t-3)', wordBreak: 'break-all', marginBottom: 18 }}>
-        ⌁ {url}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {lines.map((l, i) => {
-          const done = i < beats;
-          const active = i === beats;
-          return (
-            <div key={l} style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              opacity: done || active ? 1 : .35, transition: 'opacity .3s',
-            }}>
-              <span style={{
-                width: 14, height: 14, borderRadius: 999,
-                border: done ? '1px solid var(--plum-600)' : '1px solid var(--hair-strong)',
-                background: done ? 'var(--plum-600)' : 'transparent',
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                color: '#fff', fontSize: 9,
-              }}>{done ? '✓' : ''}</span>
-              <span className="serif" style={{
-                fontSize: 18, fontStyle: active ? 'italic' : 'normal', letterSpacing: '-0.01em',
-              }}>
-                {l}
-                {active && <span className="dots-pulse" style={{ marginLeft: 6, color: 'var(--t-4)' }}>…</span>}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-      <style>{`
-        .dots-pulse { animation: pulseO 1.2s ease-in-out infinite; }
-        @keyframes pulseO { 0%,100% { opacity:.3 } 50% { opacity:1 } }
-      `}</style>
-    </div>
-  );
-}
-
-function ParsedCompanyPanel({ profile, onFinish, isSubmitting }: { profile: Profile; onFinish: () => void; isSubmitting: boolean }) {
-  return (
-    <div>
-      <div style={{
-        border: '1px solid var(--hair-strong)', borderRadius: 14,
-        background: '#fff', padding: '24px 26px',
-      }}>
-        <div style={{
-          display: 'flex', gap: 14, alignItems: 'center',
-          borderBottom: '1px solid var(--hair)', paddingBottom: 18, marginBottom: 18,
-        }}>
-          <div style={{
-            width: 56, height: 56, borderRadius: 10,
-            background: profile.logoColor, color: '#fff',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontFamily: 'var(--mono)', fontSize: 24, fontWeight: 700,
-          }}>{profile.logo}</div>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div className="serif" style={{ fontSize: 24, letterSpacing: '-0.02em', fontStyle: 'italic' }}>
-              {profile.name}
-            </div>
-            <div style={{ fontSize: 13, color: 'var(--t-3)' }}>{profile.tagline}</div>
-            <div className="mono" style={{ fontSize: 10, letterSpacing: '.16em', color: 'var(--t-4)', marginTop: 4 }}>
-              {profile.industry.toUpperCase()} · {profile.hq.toUpperCase()} · {profile.size}
-            </div>
-          </div>
-        </div>
-
-        <div className="mono" style={{ fontSize: 10, letterSpacing: '.2em', color: 'var(--t-4)', marginBottom: 12 }}>
-          § WHAT WE FOUND
-        </div>
-        <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0,
-          border: '1px solid var(--hair)', borderRadius: 10,
-        }}>
-          {([
-            ['HEADCOUNT', profile.headcount],
-            ['FUNDING',   profile.funding],
-            ['STAGE',     profile.stage],
-            ['FOUNDED',   profile.founded],
-          ] as const).map(([k, v], i) => (
-            <div key={k} style={{
-              padding: '14px 16px',
-              borderRight: i % 2 === 0 ? '1px solid var(--hair)' : 'none',
-              borderBottom: i < 2 ? '1px solid var(--hair)' : 'none',
-            }}>
-              <div className="mono" style={{ fontSize: 9, letterSpacing: '.18em', color: 'var(--t-4)' }}>{k}</div>
-              <div className="serif" style={{ fontSize: 18, letterSpacing: '-0.01em', marginTop: 2 }}>{v}</div>
-            </div>
-          ))}
-        </div>
-
-        <div className="mono" style={{ fontSize: 10, letterSpacing: '.2em', color: 'var(--t-4)', marginTop: 18, marginBottom: 10 }}>
-          § TECH STACK
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {profile.stack.map(s => (
-            <span key={s} className="mono" style={{
-              fontSize: 10, letterSpacing: '.14em',
-              padding: '5px 10px', borderRadius: 999,
-              border: '1px solid var(--hair-strong)', color: 'var(--t-2)',
-            }}>{s.toUpperCase()}</span>
-          ))}
-        </div>
-
-        <div className="mono" style={{ fontSize: 10, letterSpacing: '.2em', color: 'var(--t-4)', marginTop: 18, marginBottom: 10 }}>
-          § RECENT OPENINGS
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {profile.openings.map((r, i) => (
-            <div key={i} style={{
-              display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
-              padding: '10px 0',
-              borderBottom: i < profile.openings.length - 1 ? '1px solid var(--hair)' : 'none',
-            }}>
-              <span className="serif" style={{ fontSize: 16 }}>{r.title}</span>
-              <span className="mono" style={{ fontSize: 10, letterSpacing: '.14em', color: 'var(--t-4)' }}>
-                {r.dept.toUpperCase()}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ display: 'flex', gap: 12, marginTop: 20, alignItems: 'center' }}>
-        <button onClick={onFinish} disabled={isSubmitting} style={{
-          flex: 1, appearance: 'none', border: 0, 
-          cursor: isSubmitting ? 'wait' : 'pointer',
-          background: 'var(--ink)', color: 'var(--paper)',
-          padding: '16px', borderRadius: 999,
-          fontFamily: 'var(--serif)', fontSize: 18, fontStyle: 'italic',
-          opacity: isSubmitting ? 0.7 : 1,
-        }}>
-          {isSubmitting ? 'Creating workspace...' : 'Looks right — create my workspace'} <span style={{ fontStyle: 'normal' }}>→</span>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function mockPullCompany(f: Form, kind: LinkKind): Profile {
-  const url = kind === 'website' ? f.website : f.linkedin;
-  let name = 'Ramp';
-  let logo = 'R';
-  let logoColor = '#3D4D2A';
-  try {
-    const m = (url || '').match(/(?:linkedin\.com\/company\/|https?:\/\/)([^/?]+)/i);
-    if (m && m[1]) {
-      const raw = m[1].replace(/^www\./, '').split(/[./-]/)[0];
-      name = raw.charAt(0).toUpperCase() + raw.slice(1);
-      logo = name[0].toUpperCase();
-      const palette = ['#3D4D2A', '#5A2E63', '#2E5A63', '#63452E', '#7A4A8E', '#0A4D40'];
-      let h = 0;
-      for (let i = 0; i < raw.length; i++) h = ((h * 31 + raw.charCodeAt(i)) | 0);
-      logoColor = palette[Math.abs(h) % palette.length];
-    }
-  } catch {}
-  return {
-    name, logo, logoColor,
-    tagline: 'Spend management for finance teams who want to move fast.',
-    industry: 'Fintech', hq: 'New York, NY', size: '500–1,000',
-    headcount: '~720', funding: '$1.4B raised', stage: 'Series E', founded: '2019',
-    stack: ['React', 'TypeScript', 'Go', 'Postgres', 'Kafka', 'AWS'],
-    openings: [
-      { title: 'Senior Platform Engineer', dept: 'Engineering' },
-      { title: 'Staff iOS Engineer',        dept: 'Engineering' },
-      { title: 'Product Manager, Cards',    dept: 'Product' },
-    ],
-  };
 }
