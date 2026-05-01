@@ -25,6 +25,8 @@ export function ClientLogin({ onEnter, onSignup }: {
   const [pw, setPw] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
 
+  const [pendingOrg, setPendingOrg] = React.useState<{ name: string; status: string } | null>(null);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !pw) {
@@ -33,15 +35,68 @@ export function ClientLogin({ onEnter, onSignup }: {
     }
     
     setIsLoading(true);
+    setPendingOrg(null);
+    
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.signInWithPassword({
+      
+      // Sign in
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password: pw,
       });
       
-      if (error) throw error;
+      if (authError) throw authError;
+      if (!authData.user) throw new Error('Authentication failed');
       
+      // Check if user belongs to a client organization
+      const { data: clientUser, error: clientError } = await supabase
+        .from('client_users')
+        .select(`
+          *,
+          organization:client_organizations(id, name, status)
+        `)
+        .eq('user_id', authData.user.id)
+        .single();
+      
+      if (clientError || !clientUser) {
+        // User is not a client, maybe admin or recruiter - allow through
+        emitToast({ kind: 'success', title: 'Welcome back', body: 'Entering the console...' });
+        onEnter?.();
+        return;
+      }
+      
+      const org = clientUser.organization as { id: string; name: string; status: string };
+      
+      // Check organization status
+      if (org.status === 'pending') {
+        // Sign out and show pending message
+        await supabase.auth.signOut();
+        setPendingOrg({ name: org.name, status: 'pending' });
+        return;
+      }
+      
+      if (org.status === 'rejected') {
+        await supabase.auth.signOut();
+        emitToast({ 
+          kind: 'error', 
+          title: 'Access denied', 
+          body: 'Your organization request was not approved. Please contact support.' 
+        });
+        return;
+      }
+      
+      if (org.status === 'suspended') {
+        await supabase.auth.signOut();
+        emitToast({ 
+          kind: 'error', 
+          title: 'Account suspended', 
+          body: 'Your organization has been suspended. Please contact support.' 
+        });
+        return;
+      }
+      
+      // Organization is approved - allow access
       emitToast({ kind: 'success', title: 'Welcome back', body: 'Entering the console...' });
       onEnter?.();
       
@@ -102,48 +157,93 @@ export function ClientLogin({ onEnter, onSignup }: {
         padding: '64px 72px', display: 'flex', flexDirection: 'column',
         justifyContent: 'center', maxWidth: 560,
       }}>
-        <div className="mono" style={{ fontSize: 10, letterSpacing: '.22em', color: 'var(--t-4)' }}>
-          SIGN IN · CLIENT CONSOLE
-        </div>
-        <div className="serif login-hero" style={{
-          fontSize: 46, fontStyle: 'italic', letterSpacing: '-0.02em', lineHeight: 1.05, marginTop: 12,
-        }}>Welcome back.</div>
-        <div style={{
-          fontSize: 15, color: 'var(--t-3)', marginTop: 8,
-          fontStyle: 'italic', fontFamily: 'var(--serif)',
-        }}>Pick up where your pipeline left off.</div>
+        {pendingOrg ? (
+          // Pending approval state
+          <>
+            <div className="mono" style={{ fontSize: 10, letterSpacing: '.22em', color: 'var(--t-4)' }}>
+              PENDING APPROVAL
+            </div>
+            <div className="serif login-hero" style={{
+              fontSize: 46, fontStyle: 'italic', letterSpacing: '-0.02em', lineHeight: 1.05, marginTop: 12,
+            }}>Almost there.</div>
+            <div style={{
+              fontSize: 15, color: 'var(--t-3)', marginTop: 8,
+              fontStyle: 'italic', fontFamily: 'var(--serif)',
+            }}>Your request for <strong>{pendingOrg.name}</strong> is being reviewed by our team.</div>
+            
+            <div style={{
+              marginTop: 32, padding: 24, background: 'var(--cream-100)',
+              border: '1px solid var(--hair)', borderRadius: 8,
+            }}>
+              <div className="mono" style={{ fontSize: 10, letterSpacing: '.18em', color: 'var(--t-4)', marginBottom: 12 }}>
+                WHAT HAPPENS NEXT
+              </div>
+              <ul style={{ margin: 0, padding: '0 0 0 18px', fontSize: 14, color: 'var(--t-2)', lineHeight: 1.7 }}>
+                <li>Our team reviews your application within 24-48 hours</li>
+                <li>You&apos;ll receive an email once approved</li>
+                <li>Then you can sign in and start hiring</li>
+              </ul>
+            </div>
+            
+            <button 
+              onClick={() => setPendingOrg(null)} 
+              className="btn" 
+              style={{
+                marginTop: 24, padding: '14px 18px', fontSize: 14,
+                background: 'transparent', border: '1px solid var(--hair)',
+                cursor: 'pointer',
+              }}
+            >
+              <span>← Back to sign in</span>
+            </button>
+          </>
+        ) : (
+          // Normal login form
+          <>
+            <div className="mono" style={{ fontSize: 10, letterSpacing: '.22em', color: 'var(--t-4)' }}>
+              SIGN IN · CLIENT CONSOLE
+            </div>
+            <div className="serif login-hero" style={{
+              fontSize: 46, fontStyle: 'italic', letterSpacing: '-0.02em', lineHeight: 1.05, marginTop: 12,
+            }}>Welcome back.</div>
+            <div style={{
+              fontSize: 15, color: 'var(--t-3)', marginTop: 8,
+              fontStyle: 'italic', fontFamily: 'var(--serif)',
+            }}>Pick up where your pipeline left off.</div>
 
-        <form onSubmit={handleLogin} style={{
-          marginTop: 40, display: 'flex', flexDirection: 'column', gap: 16,
-        }}>
-          <label>
-            <div className="mono" style={{ fontSize: 10, letterSpacing: '.18em', color: 'var(--t-4)', marginBottom: 6 }}>
-              COMPANY EMAIL
-            </div>
-            <input value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" style={inputStyle}/>
-          </label>
-          <label>
-            <div className="mono" style={{ fontSize: 10, letterSpacing: '.18em', color: 'var(--t-4)', marginBottom: 6 }}>
-              PASSWORD
-            </div>
-            <input type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="Enter your password" style={inputStyle}/>
-          </label>
-          <button type="submit" disabled={isLoading} className="btn btn-plum" style={{
-            marginTop: 12, padding: '14px 18px', fontSize: 14, justifyContent: 'space-between',
-            opacity: isLoading ? 0.7 : 1, cursor: isLoading ? 'wait' : 'pointer',
-          }}>
-            <span>{isLoading ? 'Signing in...' : 'Enter the console'}</span>
-            <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic' }}>→</span>
-          </button>
-          <div className="mono" style={{
-            fontSize: 10, letterSpacing: '.14em', color: 'var(--t-4)', textAlign: 'center', marginTop: 8,
-          }}>
-            NEW HERE? —{' '}
-            <a href="#" onClick={e => { e.preventDefault(); onSignup && onSignup(); }} style={{ color: 'var(--plum-600)' }}>
-              REQUEST ACCESS
-            </a>
-          </div>
-        </form>
+            <form onSubmit={handleLogin} style={{
+              marginTop: 40, display: 'flex', flexDirection: 'column', gap: 16,
+            }}>
+              <label>
+                <div className="mono" style={{ fontSize: 10, letterSpacing: '.18em', color: 'var(--t-4)', marginBottom: 6 }}>
+                  COMPANY EMAIL
+                </div>
+                <input value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" style={inputStyle}/>
+              </label>
+              <label>
+                <div className="mono" style={{ fontSize: 10, letterSpacing: '.18em', color: 'var(--t-4)', marginBottom: 6 }}>
+                  PASSWORD
+                </div>
+                <input type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="Enter your password" style={inputStyle}/>
+              </label>
+              <button type="submit" disabled={isLoading} className="btn btn-plum" style={{
+                marginTop: 12, padding: '14px 18px', fontSize: 14, justifyContent: 'space-between',
+                opacity: isLoading ? 0.7 : 1, cursor: isLoading ? 'wait' : 'pointer',
+              }}>
+                <span>{isLoading ? 'Signing in...' : 'Enter the console'}</span>
+                <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic' }}>→</span>
+              </button>
+              <div className="mono" style={{
+                fontSize: 10, letterSpacing: '.14em', color: 'var(--t-4)', textAlign: 'center', marginTop: 8,
+              }}>
+                NEW HERE? —{' '}
+                <a href="#" onClick={e => { e.preventDefault(); onSignup && onSignup(); }} style={{ color: 'var(--plum-600)' }}>
+                  REQUEST ACCESS
+                </a>
+              </div>
+            </form>
+          </>
+        )}
       </div>
     </div>
   );
