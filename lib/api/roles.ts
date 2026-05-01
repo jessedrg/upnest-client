@@ -43,7 +43,7 @@ function transformRole(row: Record<string, unknown>): Role {
     id: row.id,
     title: row.title,
     company: row.company_name || "Unknown Company",
-    companyLogo: row.company_logo,
+    companyLogo: row.company_logo || undefined,
     location: row.location || "Remote",
     remote: normalizeRemotePolicy(row.remote_policy),
     status,
