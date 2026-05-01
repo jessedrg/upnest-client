@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/client";
 import {
   CandidateSchema,
   type Candidate,
@@ -45,7 +45,7 @@ function transformCandidate(row: Record<string, unknown>): Candidate {
 }
 
 export async function fetchCandidates(roleId?: string): Promise<Candidate[]> {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   // First try applications table (has more candidates)
   let query = supabase
@@ -85,7 +85,7 @@ export async function fetchCandidates(roleId?: string): Promise<Candidate[]> {
 }
 
 export async function fetchCandidate(id: string): Promise<Candidate | null> {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   // Try applications first
   const { data, error } = await supabase
@@ -127,7 +127,7 @@ export async function submitCandidate(
   input: SubmitCandidateInput,
 ): Promise<Candidate> {
   const parsed = SubmitCandidateInput.parse(input);
-  const supabase = await createClient();
+  const supabase = createClient();
   
   // Get current user
   const { data: { user } } = await supabase.auth.getUser();
@@ -159,7 +159,7 @@ export async function moveCandidateStage(
   id: string,
   stage: CandidateStage,
 ): Promise<Candidate> {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   // Map our stage to database status
   const stageMap: Record<CandidateStage, string> = {

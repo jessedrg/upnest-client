@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/client";
 import { z } from "zod";
 
 export const RecruiterSchema = z.object({
@@ -42,7 +42,7 @@ function transformRecruiter(row: Record<string, unknown>): Recruiter {
 }
 
 export async function fetchRecruiters(): Promise<Recruiter[]> {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   const { data, error } = await supabase
     .from("user_profiles")
@@ -59,7 +59,7 @@ export async function fetchRecruiters(): Promise<Recruiter[]> {
 }
 
 export async function fetchRecruiter(id: string): Promise<Recruiter | null> {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   const { data, error } = await supabase
     .from("user_profiles")
@@ -79,7 +79,7 @@ export async function updateRecruiterStatus(
   id: string,
   status: "pending" | "approved" | "rejected"
 ): Promise<Recruiter> {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   const updateData: Record<string, unknown> = { status };
   

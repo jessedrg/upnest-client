@@ -1,10 +1,21 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/client";
 import {
   RoleSchema,
   type Role,
   type RoleStatus,
 } from "@/lib/schemas";
 import { z } from "zod";
+
+/**
+ * Normalize remote policy from database to schema enum
+ */
+function normalizeRemotePolicy(value: unknown): "onsite" | "hybrid" | "remote" {
+  if (typeof value !== "string") return "hybrid";
+  const normalized = value.toLowerCase().replace(/[-_\s]/g, "");
+  if (normalized === "onsite" || normalized === "office" || normalized === "inperson") return "onsite";
+  if (normalized === "remote" || normalized === "fullyremote") return "remote";
+  return "hybrid";
+}
 
 /**
  * Transform database row to frontend Role shape
@@ -34,7 +45,7 @@ function transformRole(row: Record<string, unknown>): Role {
     company: row.company_name || "Unknown Company",
     companyLogo: row.company_logo,
     location: row.location || "Remote",
-    remote: row.remote_policy || "hybrid",
+    remote: normalizeRemotePolicy(row.remote_policy),
     status,
     priority: row.focus_this_week || row.priority || false,
     bounty: {
@@ -59,7 +70,7 @@ function transformRole(row: Record<string, unknown>): Role {
 
 /* ─── Reads ───────────────────────────────────────────────────────── */
 export async function fetchRoles(): Promise<Role[]> {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   const { data, error } = await supabase
     .from("roles")
@@ -77,7 +88,7 @@ export async function fetchRoles(): Promise<Role[]> {
 }
 
 export async function fetchRole(id: string): Promise<Role | null> {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   const { data, error } = await supabase
     .from("roles")
@@ -106,7 +117,7 @@ export type CreateRoleInput = z.infer<typeof CreateRoleInput>;
 
 export async function createRole(input: CreateRoleInput): Promise<Role> {
   const parsed = CreateRoleInput.parse(input);
-  const supabase = await createClient();
+  const supabase = createClient();
   
   const { data, error } = await supabase
     .from("roles")
@@ -136,7 +147,7 @@ export async function updateRoleStatus(
   id: string,
   status: RoleStatus,
 ): Promise<Role> {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   // Map our status to database status
   const statusMap: Record<RoleStatus, string> = {

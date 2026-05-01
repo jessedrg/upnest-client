@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/supabase/client";
 import {
   StatsSchema,
   ActivitySchema,
@@ -12,7 +12,7 @@ import {
 import { z } from "zod";
 
 export async function fetchStats(): Promise<Stats> {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   // Get current user
   const { data: { user } } = await supabase.auth.getUser();
@@ -60,7 +60,7 @@ export async function fetchStats(): Promise<Stats> {
 }
 
 export async function fetchActivity(): Promise<Activity[]> {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   // Get recent notifications as activity
   const { data, error } = await supabase
@@ -87,7 +87,7 @@ export async function fetchActivity(): Promise<Activity[]> {
 }
 
 export async function fetchEmails(): Promise<Email[]> {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   // Try to get from email_tracking table
   const { data, error } = await supabase
@@ -117,7 +117,7 @@ export async function fetchEmails(): Promise<Email[]> {
 }
 
 export async function fetchContracts(): Promise<Contract[]> {
-  const supabase = await createClient();
+  const supabase = createClient();
   
   // Try agency_placements as contracts
   const { data, error } = await supabase
