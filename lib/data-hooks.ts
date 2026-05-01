@@ -106,6 +106,23 @@ export interface DBClientOrganization {
   primary_contact_id: string | null;
 }
 
+export interface DBClientUser {
+  id: string;
+  user_id: string;
+  organization_id: string;
+  role: 'owner' | 'admin' | 'member';
+  organization?: DBClientOrganization;
+}
+
+export interface DBClientRoleAccess {
+  id: string;
+  organization_id: string;
+  role_id: string;
+  can_view_candidates: boolean | null;
+  can_move_candidates: boolean | null;
+  can_leave_feedback: boolean | null;
+}
+
 // Helper to calculate time ago
 function timeAgo(date: string | null): string {
   if (!date) return 'Unknown';
@@ -254,9 +271,45 @@ function transformRecruiter(profile: DBUserProfile, stats: { submitted: number; 
   };
 }
 
+// Get current user's client organization
+async function getClientOrganization(supabase: ReturnType<typeof createClient>) {
+  // Get current user
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return null;
+
+  // Check if user belongs to a client organization
+  const { data: clientUser, error } = await supabase
+    .from('client_users')
+    .select(`
+      *,
+      organization:client_organizations(*)
+    `)
+    .eq('user_id', user.id)
+    .single();
+  
+  if (error || !clientUser) return null;
+  return clientUser as DBClientUser;
+}
+
+// Get roles accessible to a client organization
+async function getClientRoleIds(supabase: ReturnType<typeof createClient>, organizationId: string) {
+  const { data, error } = await supabase
+    .from('client_role_access')
+    .select('role_id')
+    .eq('organization_id', organizationId);
+  
+  if (error) return [];
+  return data.map(r => r.role_id);
+}
+
 // Fetcher function for SWR
 const fetcher = async <T>(key: string): Promise<T> => {
   const supabase = createClient();
+  
+  if (key === 'client-context') {
+    const clientUser = await getClientOrganization(supabase);
+    return clientUser as T;
+  }
   
   if (key === 'roles') {
     const { data: roles, error } = await supabase
@@ -302,8 +355,30 @@ const fetcher = async <T>(key: string): Promise<T> => {
   throw new Error(`Unknown key: ${key}`);
 };
 
+// Hook to get client's accessible role IDs
+export function useClientRoleAccess() {
+  const { data: clientContext } = useSWR<DBClientUser | null>('client-context', fetcher);
+  
+  const { data: accessibleRoleIds } = useSWR<string[]>(
+    clientContext?.organization_id ? `client-roles-${clientContext.organization_id}` : null,
+    async () => {
+      if (!clientContext?.organization_id) return [];
+      const supabase = createClient();
+      return getClientRoleIds(supabase, clientContext.organization_id);
+    }
+  );
+
+  return {
+    clientOrg: clientContext?.organization as DBClientOrganization | undefined,
+    accessibleRoleIds: accessibleRoleIds || [],
+    isClient: !!clientContext,
+  };
+}
+
 // Main hook to get client data
 export function useClientDataFromDB() {
+  const { clientOrg, accessibleRoleIds, isClient } = useClientRoleAccess();
+  
   const { data: roles, error: rolesError, isLoading: rolesLoading } = useSWR<DBRole[]>('roles', fetcher);
   const { data: applications, error: appsError, isLoading: appsLoading } = useSWR<DBApplication[]>('applications', fetcher);
   const { data: recruiters, error: recsError, isLoading: recsLoading } = useSWR<DBUserProfile[]>('recruiters', fetcher);
@@ -328,17 +403,28 @@ export function useClientDataFromDB() {
     const recruiterLookup = new Map<string, DBUserProfile>();
     recruiters.forEach(r => recruiterLookup.set(r.id, r));
 
-    // Build role stats
+    // Filter roles based on client access
+    // If user is a client, only show roles they have access to via client_role_access
+    // If not logged in as client or no accessibleRoleIds yet, show all roles (for admin/recruiter views)
+    const accessibleRoleIdSet = new Set(accessibleRoleIds);
+    const filteredRoles = isClient && accessibleRoleIds.length > 0
+      ? roles.filter(r => accessibleRoleIdSet.has(r.id))
+      : roles;
+
+    // Build role stats only for accessible roles
     const roleStats = new Map<string, { candidates: number; recruiters: Set<string> }>();
     applications.forEach(app => {
-      const stats = roleStats.get(app.role_id) || { candidates: 0, recruiters: new Set<string>() };
-      stats.candidates++;
-      if (app.sourced_by) stats.recruiters.add(app.sourced_by);
-      roleStats.set(app.role_id, stats);
+      // Only count stats for accessible roles
+      if (!isClient || accessibleRoleIdSet.has(app.role_id) || accessibleRoleIds.length === 0) {
+        const stats = roleStats.get(app.role_id) || { candidates: 0, recruiters: new Set<string>() };
+        stats.candidates++;
+        if (app.sourced_by) stats.recruiters.add(app.sourced_by);
+        roleStats.set(app.role_id, stats);
+      }
     });
 
-    // Transform roles
-    transformedData.roles = roles.map(r => {
+    // Transform only filtered roles
+    transformedData.roles = filteredRoles.map(r => {
       const stats = roleStats.get(r.id) || { candidates: 0, recruiters: new Set() };
       return transformRole(r, stats.candidates, stats.recruiters.size);
     });
@@ -366,15 +452,21 @@ export function useClientDataFromDB() {
       }
     });
 
-    // Transform candidates (only client-visible stages)
-    const allCandidates = applications.map(app => {
-      const recruiter = app.sourced_by ? recruiterLookup.get(app.sourced_by) : null;
-      const recruiterName = recruiter 
-        ? recruiter.full_name || `${recruiter.first_name || ''} ${recruiter.last_name || ''}`.trim() || 'Unknown'
-        : '';
-      const roleName = app.role?.title || 'Unknown Role';
-      return transformCandidate(app, roleName, recruiterName);
-    });
+    // Transform candidates (only client-visible stages and accessible roles)
+    const allCandidates = applications
+      .filter(app => {
+        // Only include candidates from accessible roles
+        if (!isClient || accessibleRoleIds.length === 0) return true;
+        return accessibleRoleIdSet.has(app.role_id);
+      })
+      .map(app => {
+        const recruiter = app.sourced_by ? recruiterLookup.get(app.sourced_by) : null;
+        const recruiterName = recruiter 
+          ? recruiter.full_name || `${recruiter.first_name || ''} ${recruiter.last_name || ''}`.trim() || 'Unknown'
+          : '';
+        const roleName = app.role?.title || 'Unknown Role';
+        return transformCandidate(app, roleName, recruiterName);
+      });
 
     transformedData.candidates = allCandidates.filter(c => VISIBLE_TO_CLIENT.has(c.stage));
 
@@ -406,9 +498,11 @@ export function useClientDataFromDB() {
         return transformRecruiter(r, stats);
       });
     
-    // Get org name from first role
-    if (roles.length > 0) {
-      transformedData.orgName = roles[0].company_name || 'Your Company';
+    // Get org name from client organization or first role
+    if (clientOrg) {
+      transformedData.orgName = clientOrg.name;
+    } else if (filteredRoles.length > 0) {
+      transformedData.orgName = filteredRoles[0].company_name || 'Your Company';
     }
   }
 
@@ -416,6 +510,9 @@ export function useClientDataFromDB() {
     ...transformedData,
     isLoading,
     error,
+    isClient,
+    clientOrg,
+    accessibleRoleIds,
     all: {
       orgs: [],
       roles: transformedData.roles,
