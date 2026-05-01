@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
 import { ClientNav, ClientTopBar } from '../../components/ClientShell';
 import { Icons } from '../../components/Icons';
 import { ToastHost, emitToast } from '../../components/Toast';
@@ -20,11 +21,24 @@ const ROUTE_META: Record<string, { t: string; s: string }> = {
   submit:     { t: 'Submit a role', s: 'NEW REQUISITION' },
 };
 
+interface ClientOrg {
+  id: string;
+  name: string;
+  logo_url: string | null;
+}
+
+interface UserInfo {
+  name: string;
+  email: string;
+  org: ClientOrg | null;
+}
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [authChecked, setAuthChecked] = useState(false);
   const [authed, setAuthed] = useState(false);
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
 
   // CreateRole modal still uses the JSX bridge until ported.
   const [createOpen, setCreateOpen] = useState(false);
@@ -34,12 +48,71 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const meta = ROUTE_META[seg] || ROUTE_META.overview;
 
   useEffect(() => {
-    try {
-      const auth = JSON.parse(localStorage.getItem('upnest:auth') || '{}');
-      if (!auth.client) router.replace('/login');
-      else setAuthed(true);
-    } catch { router.replace('/login'); }
-    setAuthChecked(true);
+    const checkAuth = async () => {
+      const supabase = createClient();
+      
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        router.replace('/login');
+        setAuthChecked(true);
+        return;
+      }
+      
+      // Get user profile and client organization
+      const { data: clientUser } = await supabase
+        .from('client_users')
+        .select(`
+          organization:client_organizations(id, name, logo_url, status)
+        `)
+        .eq('user_id', user.id)
+        .single();
+      
+      if (!clientUser?.organization) {
+        // User is not a client - might be admin/recruiter, allow for now
+        setUserInfo({
+          name: user.user_metadata?.first_name || user.email?.split('@')[0] || 'User',
+          email: user.email || '',
+          org: null,
+        });
+        setAuthed(true);
+        setAuthChecked(true);
+        return;
+      }
+      
+      const org = clientUser.organization as ClientOrg & { status: string };
+      
+      // Check if organization is approved
+      if (org.status !== 'approved') {
+        await supabase.auth.signOut();
+        router.replace('/login?pending=' + encodeURIComponent(org.name));
+        setAuthChecked(true);
+        return;
+      }
+      
+      // Get user profile for name
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('first_name, last_name, full_name')
+        .eq('id', user.id)
+        .single();
+      
+      const userName = profile?.full_name || 
+        `${profile?.first_name || ''} ${profile?.last_name || ''}`.trim() ||
+        user.user_metadata?.first_name ||
+        user.email?.split('@')[0] || 'User';
+      
+      setUserInfo({
+        name: userName,
+        email: user.email || '',
+        org: { id: org.id, name: org.name, logo_url: org.logo_url },
+      });
+      setAuthed(true);
+      setAuthChecked(true);
+    };
+    
+    checkAuth();
   }, [router]);
 
   useEffect(() => {
@@ -55,12 +128,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     if (ROUTE_META[k]) router.push('/' + k);
   }, [router]);
 
-  const onExitClient = useCallback(() => {
-    try {
-      const auth = JSON.parse(localStorage.getItem('upnest:auth') || '{}');
-      auth.client = false;
-      localStorage.setItem('upnest:auth', JSON.stringify(auth));
-    } catch {}
+  const onExitClient = useCallback(async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
     router.push('/login');
   }, [router]);
 
@@ -98,9 +168,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           current={seg === 'role-detail' ? 'roles' : (seg as any)}
           onNavigate={onNavigate}
           onExitClient={onExitClient}
-          orgName="Ramp"
-          orgLogo="R"
-          userName="Catherine Hughes"
+          orgName={userInfo?.org?.name || 'Your Company'}
+          orgLogo={userInfo?.org?.logo_url || userInfo?.org?.name?.[0] || 'C'}
+          userName={userInfo?.name || 'User'}
         />
         <main style={{ flex: 1, minWidth: 0, background: 'var(--paper)' }}>
           <ClientTopBar title={meta.t} subtitle={meta.s} right={right}/>

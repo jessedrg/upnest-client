@@ -17,15 +17,18 @@ const inputStyle: React.CSSProperties = {
   outline: 'none',
 };
 
-export function ClientLogin({ onEnter, onSignup }: {
+export function ClientLogin({ onEnter, onSignup, initialPendingOrg }: {
   onEnter?: () => void;
   onSignup?: () => void;
+  initialPendingOrg?: string | null;
 }) {
   const [email, setEmail] = React.useState('');
   const [pw, setPw] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
 
-  const [pendingOrg, setPendingOrg] = React.useState<{ name: string; status: string } | null>(null);
+  const [pendingOrg, setPendingOrg] = React.useState<{ name: string; status: string } | null>(
+    initialPendingOrg ? { name: initialPendingOrg, status: 'pending' } : null
+  );
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
