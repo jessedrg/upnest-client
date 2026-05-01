@@ -47,7 +47,7 @@ function transformRole(row: Record<string, unknown>): Role {
     location: row.location || "Remote",
     remote: normalizeRemotePolicy(row.remote_policy),
     status,
-    priority: row.focus_this_week || row.priority || false,
+    priority: Boolean(row.focus_this_week || row.priority),
     bounty: {
       amount: Number(row.bounty) || 0,
       currency: "USD",
