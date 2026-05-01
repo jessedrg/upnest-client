@@ -1,5 +1,4 @@
-import { sleep, ApiClient } from "./_client";
-import { mockRoles } from "@/lib/mock";
+import { createClient } from "@/lib/supabase/server";
 import {
   RoleSchema,
   type Role,
@@ -7,24 +6,91 @@ import {
 } from "@/lib/schemas";
 import { z } from "zod";
 
+/**
+ * Transform database row to frontend Role shape
+ */
+function transformRole(row: Record<string, unknown>): Role {
+  // Count pipeline stages from sourced_candidates or applications if available
+  const pipeline = {
+    sourced: 0,
+    submitted: 0,
+    interviewing: 0,
+    offered: 0,
+    hired: 0,
+  };
+  
+  // Map database status to our status enum
+  const statusMap: Record<string, RoleStatus> = {
+    active: "open",
+    paused: "on_hold",
+    closed: "closed",
+  };
+  
+  const status = statusMap[row.status as string] || "open";
+  
+  return RoleSchema.parse({
+    id: row.id,
+    title: row.title,
+    company: row.company_name || "Unknown Company",
+    companyLogo: row.company_logo,
+    location: row.location || "Remote",
+    remote: row.remote_policy || "hybrid",
+    status,
+    priority: row.focus_this_week || row.priority || false,
+    bounty: {
+      amount: Number(row.bounty) || 0,
+      currency: "USD",
+    },
+    baseSalary: row.salary_range
+      ? {
+          min: 0,
+          max: 0,
+          currency: "USD",
+        }
+      : undefined,
+    postedAt: row.created_at as string,
+    closesAt: undefined,
+    pipeline,
+    tags: [],
+    description: row.description,
+    recruiters: [],
+  });
+}
+
 /* ─── Reads ───────────────────────────────────────────────────────── */
 export async function fetchRoles(): Promise<Role[]> {
-  if (ApiClient.useMocks) {
-    await sleep(500);
-    return z.array(RoleSchema).parse(mockRoles);
+  const supabase = await createClient();
+  
+  const { data, error } = await supabase
+    .from("roles")
+    .select("*")
+    .eq("is_hidden", false)
+    .eq("approval_status", "approved")
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("[v0] Error fetching roles:", error);
+    return [];
   }
-  const data = await ApiClient.get<unknown>("/v1/roles");
-  return z.array(RoleSchema).parse(data);
+
+  return (data || []).map(transformRole);
 }
 
 export async function fetchRole(id: string): Promise<Role | null> {
-  if (ApiClient.useMocks) {
-    await sleep(400);
-    const r = mockRoles.find((x) => x.id === id);
-    return r ? RoleSchema.parse(r) : null;
+  const supabase = await createClient();
+  
+  const { data, error } = await supabase
+    .from("roles")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error) {
+    console.error("[v0] Error fetching role:", error);
+    return null;
   }
-  const data = await ApiClient.get<unknown>(`/v1/roles/${id}`);
-  return RoleSchema.parse(data);
+
+  return transformRole(data);
 }
 
 /* ─── Mutations ───────────────────────────────────────────────────── */
@@ -40,38 +106,62 @@ export type CreateRoleInput = z.infer<typeof CreateRoleInput>;
 
 export async function createRole(input: CreateRoleInput): Promise<Role> {
   const parsed = CreateRoleInput.parse(input);
-  if (ApiClient.useMocks) {
-    await sleep(600);
-    return RoleSchema.parse({
-      id: `r_${Date.now()}`,
+  const supabase = await createClient();
+  
+  const { data, error } = await supabase
+    .from("roles")
+    .insert({
       title: parsed.title,
-      company: parsed.company,
+      company_name: parsed.company,
       location: parsed.location,
-      remote: parsed.remote,
-      status: "open",
-      priority: false,
-      bounty: { amount: parsed.bountyAmount, currency: "USD" },
-      postedAt: new Date().toISOString(),
-      pipeline: { sourced: 0, submitted: 0, interviewing: 0, offered: 0, hired: 0 },
-      tags: [],
+      remote_policy: parsed.remote,
+      bounty: parsed.bountyAmount,
       description: parsed.description,
-      recruiters: [],
-    });
+      type: "Full-time",
+      department: "Engineering",
+      requirements: "",
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[v0] Error creating role:", error);
+    throw new Error("Failed to create role");
   }
-  return RoleSchema.parse(await ApiClient.post("/v1/roles", parsed));
+
+  return transformRole(data);
 }
 
 export async function updateRoleStatus(
   id: string,
   status: RoleStatus,
 ): Promise<Role> {
-  if (ApiClient.useMocks) {
-    await sleep(300);
-    const r = mockRoles.find((x) => x.id === id);
-    if (!r) throw new Error("not found");
-    return RoleSchema.parse({ ...r, status });
+  const supabase = await createClient();
+  
+  // Map our status to database status
+  const statusMap: Record<RoleStatus, string> = {
+    draft: "paused",
+    open: "active",
+    priority: "active",
+    on_hold: "paused",
+    filled: "closed",
+    closed: "closed",
+  };
+  
+  const { data, error } = await supabase
+    .from("roles")
+    .update({ 
+      status: statusMap[status],
+      focus_this_week: status === "priority",
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[v0] Error updating role status:", error);
+    throw new Error("Failed to update role status");
   }
-  return RoleSchema.parse(
-    await ApiClient.post(`/v1/roles/${id}/status`, { status }),
-  );
+
+  return transformRole(data);
 }

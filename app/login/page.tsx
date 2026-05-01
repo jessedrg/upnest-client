@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/toast";
+import { signIn } from "@/lib/supabase/auth";
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
@@ -19,13 +20,33 @@ const inputStyle: React.CSSProperties = {
 export default function ClientLoginPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const [email, setEmail] = React.useState("catherine@ramp.com");
-  const [pw, setPw] = React.useState("••••••••••••");
+  const [email, setEmail] = React.useState("");
+  const [pw, setPw] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    toast({ title: "Welcome back", tone: "success" });
-    setTimeout(() => router.push("/dashboard"), 320);
+    
+    if (!email || !pw) {
+      toast({ title: "Please enter email and password", tone: "error" });
+      return;
+    }
+
+    setLoading(true);
+    
+    const { user, error } = await signIn(email, pw);
+    
+    setLoading(false);
+    
+    if (error) {
+      toast({ title: error, tone: "error" });
+      return;
+    }
+
+    if (user) {
+      toast({ title: "Welcome back", tone: "success" });
+      setTimeout(() => router.push("/dashboard"), 320);
+    }
   }
 
   return (
@@ -127,20 +148,35 @@ export default function ClientLoginPage() {
             <div className="mono" style={{ fontSize: 10, letterSpacing: ".18em", color: "var(--t-4)", marginBottom: 6 }}>
               COMPANY EMAIL
             </div>
-            <input value={email} onChange={(e) => setEmail(e.target.value)} style={inputStyle} />
+            <input 
+              value={email} 
+              onChange={(e) => setEmail(e.target.value)} 
+              style={inputStyle}
+              type="email"
+              placeholder="you@company.com"
+              disabled={loading}
+            />
           </label>
           <label>
             <div className="mono" style={{ fontSize: 10, letterSpacing: ".18em", color: "var(--t-4)", marginBottom: 6 }}>
               PASSWORD
             </div>
-            <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} style={inputStyle} />
+            <input 
+              type="password" 
+              value={pw} 
+              onChange={(e) => setPw(e.target.value)} 
+              style={inputStyle}
+              placeholder="Enter your password"
+              disabled={loading}
+            />
           </label>
           <button
             type="submit"
             className="btn btn-plum"
             style={{ marginTop: 12, padding: "14px 18px", fontSize: 14, justifyContent: "space-between" }}
+            disabled={loading}
           >
-            <span>Enter the console</span>
+            <span>{loading ? "Signing in..." : "Enter the console"}</span>
             <span style={{ fontFamily: "var(--serif)", fontStyle: "italic" }}>→</span>
           </button>
           <div

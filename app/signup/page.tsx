@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/toast";
+import { signUp } from "@/lib/supabase/auth";
 import { mockPullCompany, type CompanyProfile } from "./types";
 import { CompanyAnalyzingPanel, ParsedCompanyPanel } from "./panels";
 
@@ -34,9 +35,11 @@ export default function ClientSignupPage() {
   const [pullKind, setPullKind] = React.useState<"website" | "linkedin">("linkedin");
   const [analyzeBeats, setAnalyzeBeats] = React.useState(0);
   const [profile, setProfile] = React.useState<CompanyProfile | null>(null);
+  const [loading, setLoading] = React.useState(false);
   const [form, setForm] = React.useState({
     fullName: "",
     workEmail: "",
+    password: "",
     role: "",
     website: "",
     linkedin: "",
@@ -49,6 +52,7 @@ export default function ClientSignupPage() {
   function pullFrom(kind: "website" | "linkedin") {
     if (kind === "website" && !form.website) return toast({ title: "Add your website first", tone: "error" });
     if (kind === "linkedin" && !form.linkedin) return toast({ title: "Add a LinkedIn URL first", tone: "error" });
+    if (!form.workEmail || !form.password) return toast({ title: "Please enter email and password", tone: "error" });
     setPullKind(kind);
     setStep("analyzing");
     setAnalyzeBeats(0);
@@ -66,9 +70,30 @@ export default function ClientSignupPage() {
     return () => clearTimeout(t);
   }, [step, analyzeBeats, form, pullKind]);
 
-  function finish() {
-    toast({ title: "Workspace created", tone: "success" });
-    setTimeout(() => router.push("/dashboard"), 320);
+  async function finish() {
+    if (!form.workEmail || !form.password) {
+      toast({ title: "Please enter email and password", tone: "error" });
+      return;
+    }
+
+    setLoading(true);
+    
+    const { user, error } = await signUp(form.workEmail, form.password, {
+      fullName: form.fullName,
+      role: "client", // Default to client role for company signups
+    });
+    
+    setLoading(false);
+    
+    if (error) {
+      toast({ title: error, tone: "error" });
+      return;
+    }
+
+    if (user) {
+      toast({ title: "Account created! Please check your email to confirm.", tone: "success" });
+      setTimeout(() => router.push("/dashboard"), 320);
+    }
   }
 
   return (
@@ -132,6 +157,7 @@ export default function ClientSignupPage() {
                     value={form.fullName}
                     onChange={(e) => handle("fullName", e.target.value)}
                     placeholder="Catherine Wu"
+                    disabled={loading}
                   />
                 </label>
                 <label>
@@ -143,6 +169,7 @@ export default function ClientSignupPage() {
                     value={form.role}
                     onChange={(e) => handle("role", e.target.value)}
                     placeholder="Head of Talent"
+                    disabled={loading}
                   />
                 </label>
               </div>
@@ -156,6 +183,20 @@ export default function ClientSignupPage() {
                   value={form.workEmail}
                   onChange={(e) => handle("workEmail", e.target.value)}
                   placeholder="catherine@ramp.com"
+                  disabled={loading}
+                />
+              </label>
+              <label>
+                <div className="mono" style={{ fontSize: 10, letterSpacing: ".18em", color: "var(--t-4)", marginBottom: 6 }}>
+                  PASSWORD
+                </div>
+                <input
+                  style={inputStyle}
+                  type="password"
+                  value={form.password}
+                  onChange={(e) => handle("password", e.target.value)}
+                  placeholder="Min 8 characters"
+                  disabled={loading}
                 />
               </label>
 
@@ -175,8 +216,14 @@ export default function ClientSignupPage() {
                     value={form.linkedin}
                     onChange={(e) => handle("linkedin", e.target.value)}
                     placeholder="linkedin.com/company/ramp"
+                    disabled={loading}
                   />
-                  <button onClick={() => pullFrom("linkedin")} className="btn btn-plum" style={{ borderRadius: 12, padding: "0 18px" }}>
+                  <button 
+                    onClick={() => pullFrom("linkedin")} 
+                    className="btn btn-plum" 
+                    style={{ borderRadius: 12, padding: "0 18px" }}
+                    disabled={loading}
+                  >
                     Pull from LinkedIn
                   </button>
                 </div>
@@ -200,11 +247,13 @@ export default function ClientSignupPage() {
                     value={form.website}
                     onChange={(e) => handle("website", e.target.value)}
                     placeholder="ramp.com"
+                    disabled={loading}
                   />
                   <button
                     onClick={() => pullFrom("website")}
                     className="btn btn-ghost"
                     style={{ borderRadius: 12, padding: "0 18px" }}
+                    disabled={loading}
                   >
                     Pull from website
                   </button>

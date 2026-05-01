@@ -1,5 +1,4 @@
-import { sleep, ApiClient } from "./_client";
-import { mockCandidates } from "@/lib/mock";
+import { createClient } from "@/lib/supabase/server";
 import {
   CandidateSchema,
   type Candidate,
@@ -7,27 +6,111 @@ import {
 } from "@/lib/schemas";
 import { z } from "zod";
 
+/**
+ * Transform database row to frontend Candidate shape
+ */
+function transformCandidate(row: Record<string, unknown>): Candidate {
+  // Map database status to our stage enum
+  const stageMap: Record<string, CandidateStage> = {
+    sourced: "sourced",
+    submitted: "submitted",
+    phone_screen: "submitted",
+    interviewing: "interviewing",
+    offer: "offered",
+    hired: "hired",
+    rejected: "rejected",
+    withdrawn: "rejected",
+  };
+  
+  return CandidateSchema.parse({
+    id: row.id,
+    name: row.candidate_name || row.name || "Unknown",
+    title: row.current_title || row.title || "N/A",
+    avatar: row.avatar_url || row.photo_url,
+    email: row.candidate_email || row.email,
+    phone: row.candidate_phone || row.phone,
+    linkedin: row.linkedin_url || row.linkedin,
+    yearsExperience: row.years_experience,
+    location: row.location,
+    roleId: row.role_id,
+    stage: stageMap[row.status as string] || "submitted",
+    submittedBy: row.sourced_by || row.submitted_by || "",
+    submittedAt: row.created_at as string,
+    notes: row.notes || row.cover_letter,
+    fitScore: row.fit_score || row.ai_score,
+    rejectionReason: row.rejection_reason,
+    experience: [],
+    skills: row.skills || [],
+  });
+}
+
 export async function fetchCandidates(roleId?: string): Promise<Candidate[]> {
-  if (ApiClient.useMocks) {
-    await sleep(450);
-    const list = roleId
-      ? mockCandidates.filter((c) => c.roleId === roleId)
-      : mockCandidates;
-    return z.array(CandidateSchema).parse(list);
+  const supabase = await createClient();
+  
+  // First try applications table (has more candidates)
+  let query = supabase
+    .from("applications")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  if (roleId) {
+    query = query.eq("role_id", roleId);
   }
-  const path = roleId ? `/v1/candidates?roleId=${roleId}` : "/v1/candidates";
-  return z.array(CandidateSchema).parse(await ApiClient.get<unknown>(path));
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error("[v0] Error fetching candidates from applications:", error);
+    // Try sourced_candidates as fallback
+    const sourcedQuery = supabase
+      .from("sourced_candidates")
+      .select("*")
+      .order("created_at", { ascending: false });
+    
+    if (roleId) {
+      sourcedQuery.eq("role_id", roleId);
+    }
+    
+    const { data: sourcedData, error: sourcedError } = await sourcedQuery;
+    
+    if (sourcedError) {
+      console.error("[v0] Error fetching sourced candidates:", sourcedError);
+      return [];
+    }
+    
+    return (sourcedData || []).map(transformCandidate);
+  }
+
+  return (data || []).map(transformCandidate);
 }
 
 export async function fetchCandidate(id: string): Promise<Candidate | null> {
-  if (ApiClient.useMocks) {
-    await sleep(300);
-    const c = mockCandidates.find((x) => x.id === id);
-    return c ? CandidateSchema.parse(c) : null;
+  const supabase = await createClient();
+  
+  // Try applications first
+  const { data, error } = await supabase
+    .from("applications")
+    .select("*")
+    .eq("id", id)
+    .single();
+
+  if (error) {
+    // Try sourced_candidates
+    const { data: sourcedData, error: sourcedError } = await supabase
+      .from("sourced_candidates")
+      .select("*")
+      .eq("id", id)
+      .single();
+    
+    if (sourcedError) {
+      console.error("[v0] Error fetching candidate:", sourcedError);
+      return null;
+    }
+    
+    return transformCandidate(sourcedData);
   }
-  return CandidateSchema.parse(
-    await ApiClient.get<unknown>(`/v1/candidates/${id}`),
-  );
+
+  return transformCandidate(data);
 }
 
 export const SubmitCandidateInput = z.object({
@@ -44,32 +127,74 @@ export async function submitCandidate(
   input: SubmitCandidateInput,
 ): Promise<Candidate> {
   const parsed = SubmitCandidateInput.parse(input);
-  if (ApiClient.useMocks) {
-    await sleep(700);
-    return CandidateSchema.parse({
-      id: `c_${Date.now()}`,
-      ...parsed,
-      stage: "submitted",
-      submittedBy: "u_me",
-      submittedAt: new Date().toISOString(),
-    });
+  const supabase = await createClient();
+  
+  // Get current user
+  const { data: { user } } = await supabase.auth.getUser();
+  
+  const { data, error } = await supabase
+    .from("applications")
+    .insert({
+      role_id: parsed.roleId,
+      candidate_name: parsed.name,
+      candidate_email: parsed.email || `${parsed.name.toLowerCase().replace(/\s+/g, '.')}@example.com`,
+      current_title: parsed.title,
+      linkedin_url: parsed.linkedin,
+      notes: parsed.notes,
+      status: "submitted",
+      sourced_by: user?.id,
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error("[v0] Error submitting candidate:", error);
+    throw new Error("Failed to submit candidate");
   }
-  return CandidateSchema.parse(
-    await ApiClient.post("/v1/candidates", parsed),
-  );
+
+  return transformCandidate(data);
 }
 
 export async function moveCandidateStage(
   id: string,
   stage: CandidateStage,
 ): Promise<Candidate> {
-  if (ApiClient.useMocks) {
-    await sleep(300);
-    const c = mockCandidates.find((x) => x.id === id);
-    if (!c) throw new Error("not found");
-    return CandidateSchema.parse({ ...c, stage });
+  const supabase = await createClient();
+  
+  // Map our stage to database status
+  const stageMap: Record<CandidateStage, string> = {
+    sourced: "sourced",
+    submitted: "submitted",
+    interviewing: "interviewing",
+    offered: "offer",
+    hired: "hired",
+    rejected: "rejected",
+  };
+  
+  // Try to update in applications first
+  const { data, error } = await supabase
+    .from("applications")
+    .update({ status: stageMap[stage] })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) {
+    // Try sourced_candidates
+    const { data: sourcedData, error: sourcedError } = await supabase
+      .from("sourced_candidates")
+      .update({ status: stageMap[stage] })
+      .eq("id", id)
+      .select()
+      .single();
+    
+    if (sourcedError) {
+      console.error("[v0] Error moving candidate stage:", sourcedError);
+      throw new Error("Failed to update candidate stage");
+    }
+    
+    return transformCandidate(sourcedData);
   }
-  return CandidateSchema.parse(
-    await ApiClient.post(`/v1/candidates/${id}/stage`, { stage }),
-  );
+
+  return transformCandidate(data);
 }
