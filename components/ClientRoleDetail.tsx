@@ -3,7 +3,8 @@
 // ClientRoleDetail — TSX port. Drag pipeline + recruiters working + activity.
 
 import * as React from 'react';
-import { ADMIN_DATA, type Candidate, type Recruiter, type RoleRow } from './AdminData';
+import { type Candidate, type Recruiter, type RoleRow } from '../lib/admin-data';
+import { useRoleWithCandidates } from '../lib/data-hooks';
 import { Chip, SectionTitle, Hairline } from './AdminShared';
 import { emitToast } from './Toast';
 
@@ -44,16 +45,25 @@ export function ClientRoleDetail({ role, onBack, onCandidate }: {
     );
   }
 
+  const { candidates: roleCandidates, recruiters: activeRecruiters } = useRoleWithCandidates(role.id);
+  
   const [r, setR] = React.useState<RoleRow>(role);
   const [pipeline, setPipeline] = React.useState<Pipeline>(() => {
-    const cands = ADMIN_DATA.candidates.filter(c => c.roleId === role.id);
     const cols = Object.fromEntries(STAGES.map(s => [s, [] as Candidate[]])) as Pipeline;
-    cands.forEach(c => {
-      const s = c.stage as Stage;
-      if (cols[s]) cols[s].push(c);
-    });
     return cols;
   });
+  
+  // Update pipeline when candidates load
+  React.useEffect(() => {
+    if (roleCandidates && roleCandidates.length > 0) {
+      const cols = Object.fromEntries(STAGES.map(s => [s, [] as Candidate[]])) as Pipeline;
+      roleCandidates.forEach(c => {
+        const s = c.stage as Stage;
+        if (cols[s]) cols[s].push(c);
+      });
+      setPipeline(cols);
+    }
+  }, [roleCandidates]);
 
   const [dragId, setDragId] = React.useState<string | null>(null);
   const [dragOverCol, setDragOverCol] = React.useState<Stage | null>(null);
@@ -247,9 +257,9 @@ export function ClientRoleDetail({ role, onBack, onCandidate }: {
         <SectionTitle num="§ 02" title="Recruiters working this role"/>
         <Hairline/>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
-          {ADMIN_DATA.recruiters
+          {(activeRecruiters || [])
             .filter((rc: Recruiter) => rc.status === 'active')
-            .slice(0, r.recruiters)
+            .slice(0, r.recruiters || 5)
             .map(rc => (
               <div key={rc.id} style={{
                 display: 'grid',

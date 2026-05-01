@@ -1,13 +1,17 @@
 'use client';
 
 import * as React from 'react';
-import { ADMIN_DATA, type Candidate } from './admin-data';
+import { type Candidate } from './admin-data';
+import { createClient } from '@/lib/supabase/client';
 import { emitToast } from '../components/Toast';
 
-// CandidateStore — pub/sub on top of ADMIN_DATA.candidates so admin
-// stage changes instantly propagate to the client-side candidates view.
+// CandidateStore — handles candidate stage changes with Supabase integration
+// Changes are persisted to the database and trigger UI updates
 
 const subs = new Set<() => void>();
+
+// Local cache for optimistic updates
+let localCandidates: Candidate[] = [];
 
 export const STAGES = ['New','Screening','Phone','Technical','Sent to Client','On-site','Offer','Hired','Rejected','Withdrawn'] as const;
 const VISIBLE_TO_CLIENT = new Set(['Sent to Client','On-site','Offer','Hired']);
@@ -45,18 +49,44 @@ export const WITHDRAW_REASONS: ReasonRow[] = [
 
 const notify = () => { for (const fn of subs) try { fn(); } catch (e) { console.error(e); } };
 
-export function setStage(id: string, stage: string, opts: { silent?: boolean } = {}) {
-  const c = ADMIN_DATA.candidates.find(x => x.id === id);
-  if (!c) return;
-  const prev = c.stage;
-  if (prev === stage) return;
-  c.stage = stage;
-  if (stage === 'Sent to Client' && !c.sentAt) {
-    c.sentAt = 'just now';
+// Map frontend stage names to database interview_status values
+const stageToDbStatus: Record<string, string> = {
+  'New': 'new',
+  'Screening': 'screening',
+  'Phone': 'phone_interview',
+  'Technical': 'technical_interview',
+  'Sent to Client': 'sent_to_client',
+  'On-site': 'onsite_interview',
+  'Offer': 'offer',
+  'Hired': 'hired',
+  'Rejected': 'rejected',
+  'Withdrawn': 'rejected',
+};
+
+export async function setStage(id: string, stage: string, opts: { silent?: boolean } = {}) {
+  const supabase = createClient();
+  const dbStatus = stageToDbStatus[stage] || 'new';
+  
+  // Update in Supabase
+  const { error } = await supabase
+    .from('applications')
+    .update({ 
+      interview_status: dbStatus,
+      status_entered_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+  
+  if (error) {
+    console.error('Failed to update candidate stage:', error);
+    emitToast({
+      kind: 'error',
+      title: 'Failed to update',
+      body: error.message,
+    });
+    return;
   }
-  if (prev === 'Rejected' && stage !== 'Rejected') {
-    delete c.rejection;
-  }
+  
+  // Show toast
   if (opts.silent !== true) {
     const visible = VISIBLE_TO_CLIENT.has(stage);
     const verb = stage === 'Sent to Client' ? 'sent to client'
@@ -65,50 +95,72 @@ export function setStage(id: string, stage: string, opts: { silent?: boolean } =
       : 'moved to ' + stage;
     emitToast({
       kind: stage === 'Hired' ? 'success' : stage === 'Rejected' ? 'error' : 'info',
-      title: c.name + ' ' + verb,
-      body: visible ? 'Now visible to ' + (c.org || 'client') + '.' : 'Internal stage update.',
+      title: 'Candidate ' + verb,
+      body: visible ? 'Now visible to client.' : 'Internal stage update.',
     });
   }
   notify();
 }
 
-export function reject(id: string, reason: string, note?: string, actor?: { name: string; role: string }) {
-  const c = ADMIN_DATA.candidates.find(x => x.id === id);
-  if (!c) return;
+export async function reject(id: string, reason: string, note?: string, actor?: { name: string; role: string }) {
+  const supabase = createClient();
   const r = REJECT_REASONS.find(x => x.code === reason) || REJECT_REASONS[REJECT_REASONS.length - 1];
-  const prevStage = c.stage;
-  c.stage = 'Rejected';
-  c.rejection = {
-    code: r.code, label: r.label, tone: r.tone,
-    note: (note || '').trim(),
-    at: 'just now', atIso: new Date().toISOString(),
-    by: actor || { name: 'You', role: 'recruiter' },
-    fromStage: prevStage, kind: 'reject',
-  };
+  
+  // Update in Supabase
+  const { error } = await supabase
+    .from('applications')
+    .update({ 
+      interview_status: 'rejected',
+      rejection_reason: r.label + (note ? ': ' + note : ''),
+      status_entered_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+  
+  if (error) {
+    console.error('Failed to reject candidate:', error);
+    emitToast({
+      kind: 'error',
+      title: 'Failed to reject',
+      body: error.message,
+    });
+    return;
+  }
+  
   emitToast({
     kind: 'error',
-    title: c.name + ' rejected',
+    title: 'Candidate rejected',
     body: r.label + (note ? ' — ' + note.slice(0, 60) + (note.length > 60 ? '…' : '') : ''),
   });
   notify();
 }
 
-export function withdraw(id: string, reason: string, note?: string, actor?: { name: string; role: string }) {
-  const c = ADMIN_DATA.candidates.find(x => x.id === id);
-  if (!c) return;
+export async function withdraw(id: string, reason: string, note?: string, actor?: { name: string; role: string }) {
+  const supabase = createClient();
   const r = WITHDRAW_REASONS.find(x => x.code === reason) || WITHDRAW_REASONS[WITHDRAW_REASONS.length - 1];
-  const prevStage = c.stage;
-  c.stage = 'Withdrawn';
-  c.rejection = {
-    code: r.code, label: r.label, tone: r.tone,
-    note: (note || '').trim(),
-    at: 'just now', atIso: new Date().toISOString(),
-    by: actor || { name: 'You', role: 'recruiter' },
-    fromStage: prevStage, kind: 'withdraw',
-  };
+  
+  // Update in Supabase - use rejected status for withdrawn
+  const { error } = await supabase
+    .from('applications')
+    .update({ 
+      interview_status: 'rejected',
+      rejection_reason: 'Withdrawn: ' + r.label + (note ? ': ' + note : ''),
+      status_entered_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+  
+  if (error) {
+    console.error('Failed to withdraw candidate:', error);
+    emitToast({
+      kind: 'error',
+      title: 'Failed to withdraw',
+      body: error.message,
+    });
+    return;
+  }
+  
   emitToast({
     kind: 'info',
-    title: c.name + ' withdrawn',
+    title: 'Candidate withdrawn',
     body: r.label + (note ? ' — ' + note.slice(0, 60) + (note.length > 60 ? '…' : '') : ''),
   });
   notify();
@@ -122,7 +174,7 @@ export function useCandidateStore() {
   const [, setTick] = React.useState(0);
   React.useEffect(() => subscribe(() => setTick(t => t + 1)), []);
   return {
-    candidates: ADMIN_DATA.candidates,
+    candidates: localCandidates,
     setStage, reject, withdraw, visibleToClient,
     STAGES, REJECT_REASONS, WITHDRAW_REASONS,
   };

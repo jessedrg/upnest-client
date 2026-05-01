@@ -4,8 +4,10 @@
 // Migrated from public/src/ClientSections.jsx with native TS imports.
 
 import * as React from 'react';
-import { ADMIN_DATA, type Candidate } from '../lib/admin-data';
+import { type Candidate } from '../lib/admin-data';
 import { useClientData } from './ClientViews';
+
+const STAGES = ['New', 'Screening', 'Phone', 'Technical', 'Sent to Client', 'On-site', 'Offer', 'Hired', 'Rejected'];
 import { Chip, SectionTitle, Hairline, Mini, KpiTile } from './AdminShared';
 import { Icons } from './Icons';
 import { emitToast } from './Toast';
@@ -49,7 +51,7 @@ export function ClientCandidates({ onCandidate }: { onCandidate?: (c: Candidate)
         </div>
         <select value={stage} onChange={e=>setStage(e.target.value)} style={{ border:'1px solid var(--hair)', borderRadius:999, padding:'6px 12px', fontSize:12, background:'#fff', fontFamily:'var(--sans)' }}>
           <option value="all">All stages</option>
-          {ADMIN_DATA.stages.map(s=><option key={s} value={s}>{s}</option>)}
+          {STAGES.map(s=><option key={s} value={s}>{s}</option>)}
         </select>
         <select value={roleSel} onChange={e=>setRoleSel(e.target.value)} style={{ border:'1px solid var(--hair)', borderRadius:999, padding:'6px 12px', fontSize:12, background:'#fff', fontFamily:'var(--sans)' }}>
           <option value="all">All roles</option>

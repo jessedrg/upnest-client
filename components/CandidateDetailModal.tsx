@@ -8,7 +8,7 @@
 //   openCandidateModal(candidate, 'admin' | 'recruiter' | 'client');
 
 import * as React from 'react';
-import { ADMIN_DATA, type Candidate, type RoleRow, type Recruiter, type OrgRow } from '../lib/admin-data';
+import { type Candidate, type RoleRow, type Recruiter, type OrgRow } from '../lib/admin-data';
 import { useCandidateStore, STAGES } from '../lib/candidate-store';
 import { Chip } from './AdminShared';
 import { openRejectModal } from './RejectModal';
@@ -192,23 +192,48 @@ function CandidateDetailModal({ candidate, viewer, onClose }: {
   const me = VIEWER_IDENTITY[viewer] || VIEWER_IDENTITY.admin;
 
   const allRoles = React.useMemo(() => {
+    // Only show the current role since we don't have full context from ADMIN_DATA anymore
     const roles = [{ id: c.roleId, title: c.role, org: c.org, stage: c.stage, status: 'active' as const, submitted: c.submitted }];
-    const others = ADMIN_DATA.roles.filter(r => r.id !== c.roleId && r.org === c.org).slice(0, 2);
-    others.forEach((r, i) => {
-      roles.push({
-        id: r.id, title: r.title, org: r.org,
-        stage: ['Withdrawn', 'Rejected', 'Withdrawn'][i % 3],
-        status: 'archived' as any,
-        submitted: ['3 mo ago', '5 mo ago'][i % 2],
-      });
-    });
     return roles;
-  }, [c.id, c.roleId, c.stage, c.org, c.role, c.submitted]);
+  }, [c.roleId, c.stage, c.org, c.role, c.submitted]);
 
-  const recruiterMeta: Recruiter | null =
-    ADMIN_DATA.recruiters.find(r => r.name === c.recruiter) || null;
-  const orgMeta: OrgRow | null =
-    ADMIN_DATA.orgs.find(o => o.name === c.org) || null;
+  // Simplified - create stub recruiter/org from candidate data
+  const recruiterMeta: Recruiter | null = c.recruiter ? {
+    id: 'rec-' + c.recruiter.replace(/\s/g, '-').toLowerCase(),
+    name: c.recruiter,
+    org: 'Partner Agency',
+    status: 'active',
+    tier: 'senior',
+    roles: 0,
+    submitted: 0,
+    placed: 0,
+    rev: 0,
+    fee: '22%',
+    joined: '',
+    email: '',
+    phone: '',
+    linkedin: '',
+    location: '',
+    timezone: '',
+    portfolio: '',
+    bio: '',
+  } : null;
+  
+  const orgMeta: OrgRow | null = c.org ? {
+    id: 'org-' + c.org.replace(/\s/g, '-').toLowerCase(),
+    name: c.org,
+    type: 'company',
+    tier: 'Enterprise',
+    logo: c.org[0],
+    joined: '',
+    mrr: 0,
+    health: 'healthy',
+    seats: 0,
+    roles: 0,
+    candidates: 0,
+    primary: '',
+    domain: '',
+  } : null;
 
   const handleAddNote = () => {
     const body = draft.trim();

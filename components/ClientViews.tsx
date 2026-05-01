@@ -4,35 +4,26 @@
 // Migrated from public/src/ClientViews.jsx with native TS imports.
 
 import * as React from 'react';
-import { ADMIN_DATA, type RoleRow, type Candidate, type Recruiter } from '../lib/admin-data';
-import { useCandidateStore } from '../lib/candidate-store';
+import { type RoleRow, type Candidate, type Recruiter } from '../lib/admin-data';
+import { useClientDataFromDB } from '../lib/data-hooks';
 import { KpiTile, SectionTitle, Hairline, Chip, Mini } from './AdminShared';
 import { Icons } from './Icons';
 
 // ------- scoped data hook -------
-const VISIBLE_TO_CLIENT = new Set(['Sent to Client', 'On-site', 'Offer', 'Hired', 'Rejected']);
-
 export function useClientData() {
-  // Subscribe to candidate store changes so this view updates when admin
-  // moves someone into "Sent to Client" (or beyond).
-  useCandidateStore();
-
-  const orgName = 'Ramp';
-  const roles = ADMIN_DATA.roles.filter(r => r.org === orgName);
-  const candidates = ADMIN_DATA.candidates.filter(c => c.org === orgName && VISIBLE_TO_CLIENT.has(c.stage));
-  const activeRecruiters = ADMIN_DATA.recruiters.filter(r => {
-    if (r.status !== 'active') return false;
-    return candidates.some(c => c.recruiter === r.name);
-  });
-  const submittals = ADMIN_DATA.roleSubmittals
-    ? ADMIN_DATA.roleSubmittals.filter(s => s.org === orgName)
-    : [];
-  const myActivity = ADMIN_DATA.activity.filter(a =>
-    a.actor === orgName ||
-    (a.to && a.to.toLowerCase().includes('ramp')) ||
-    (a.target && candidates.some(c => a.target.includes(c.name)))
-  );
-  return { orgName, roles, candidates, activeRecruiters, submittals, myActivity, all: ADMIN_DATA };
+  const data = useClientDataFromDB();
+  
+  return { 
+    orgName: data.orgName || 'Your Company',
+    roles: data.roles, 
+    candidates: data.candidates, 
+    activeRecruiters: data.activeRecruiters, 
+    submittals: [],
+    myActivity: [],
+    all: data.all,
+    isLoading: data.isLoading,
+    error: data.error,
+  };
 }
 
 /* ========================= CLIENT OVERVIEW ========================= */
