@@ -1,35 +1,41 @@
-# @upnest/client
+# upnest — Client Console (Next.js)
 
-Next.js 14 (App Router) — client / company-side console.
+Client portal for the upnest platform. Mirrors the original `upnest.html` Client app pixel-for-pixel.
+
+## Run
 
 ```bash
-pnpm install
-pnpm dev   # http://localhost:3000
+npm install
+npm run dev
 ```
 
-## Routes
+Then open http://localhost:3002
 
-```
-app/
-├── login, signup            ← public
-├── dashboard                ← overview KPIs
-├── roles                    ← all your roles
-├── roles/[id]               ← role detail with pipeline
-├── candidates               ← all candidates submitted to you
-├── recruiters               ← recruiters working your roles
-├── submit                   ← submit a new role (bounty + brief)
-├── billing                  ← contracts, payouts
-├── stats                    ← analytics
-├── settings                 ← org + team
-└── api/auth/[...nextauth]
-```
+## Architecture
 
-Same `lib/` layer as the partners app — see `nextjs/README.md`.
+A native Next.js 14 (App Router) app, fully TypeScript. The original
+inline-JSX prototype that ran via `@babel/standalone` has been ported to
+real ESM modules under `components/` and `lib/`:
 
-## Wiring real APIs
+- `app/(app)/` — authenticated routes (overview, roles, candidates, etc.).
+  Each page imports its TSX section directly and wraps it in
+  `<LoadingFrame>` for the skeleton transition.
+- `app/(public)/` — login & signup.
+- `components/` — every UI piece (sections, modals, shell, icons,
+  toasts, skeletons). All `.tsx`.
+- `lib/admin-data.ts` — shared mock dataset (typed).
+- `lib/candidate-store.ts` — in-memory pipeline store with subscribe/notify.
+- `app/globals.css` — the original `styles.css`, untouched.
 
-Identical to the partners app:
+There is no longer any browser-time Babel, no `window.*` registry, and no
+`public/src/*.jsx`. Every component is type-checked and tree-shaken at
+build time.
 
-1. `.env.local` → set `API_URL`, `NEXT_PUBLIC_USE_MOCKS=false`.
-2. Add auth header in `lib/api/_client.ts`.
-3. Confirm Zod schemas match real responses.
+## Auth (demo)
+
+Auth state is kept in `localStorage` under `upnest:auth`. Use the Login
+screen's "Enter as client" button (or the bottom route bar) to sign in.
+
+## Mock data
+
+All data is generated in `lib/admin-data.ts` — no backend.
