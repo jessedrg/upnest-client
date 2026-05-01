@@ -3,6 +3,8 @@
 // ClientLogin — TSX port of public/src/AppLogins.jsx::ClientLogin.
 
 import * as React from 'react';
+import { createClient } from '@/lib/supabase/client';
+import { emitToast } from './Toast';
 
 const inputStyle: React.CSSProperties = {
   width: '100%',
@@ -19,8 +21,37 @@ export function ClientLogin({ onEnter, onSignup }: {
   onEnter?: () => void;
   onSignup?: () => void;
 }) {
-  const [email, setEmail] = React.useState('catherine@ramp.com');
-  const [pw, setPw] = React.useState('••••••••••••');
+  const [email, setEmail] = React.useState('');
+  const [pw, setPw] = React.useState('');
+  const [isLoading, setIsLoading] = React.useState(false);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !pw) {
+      emitToast({ kind: 'error', title: 'Missing fields', body: 'Please enter email and password.' });
+      return;
+    }
+    
+    setIsLoading(true);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password: pw,
+      });
+      
+      if (error) throw error;
+      
+      emitToast({ kind: 'success', title: 'Welcome back', body: 'Entering the console...' });
+      onEnter?.();
+      
+    } catch (error: any) {
+      console.error('[v0] Login error:', error);
+      emitToast({ kind: 'error', title: 'Login failed', body: error?.message || 'Invalid credentials.' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
     <div className="login-split" style={{
@@ -82,25 +113,26 @@ export function ClientLogin({ onEnter, onSignup }: {
           fontStyle: 'italic', fontFamily: 'var(--serif)',
         }}>Pick up where your pipeline left off.</div>
 
-        <form onSubmit={e => { e.preventDefault(); onEnter && onEnter(); }} style={{
+        <form onSubmit={handleLogin} style={{
           marginTop: 40, display: 'flex', flexDirection: 'column', gap: 16,
         }}>
           <label>
             <div className="mono" style={{ fontSize: 10, letterSpacing: '.18em', color: 'var(--t-4)', marginBottom: 6 }}>
               COMPANY EMAIL
             </div>
-            <input value={email} onChange={e => setEmail(e.target.value)} style={inputStyle}/>
+            <input value={email} onChange={e => setEmail(e.target.value)} placeholder="you@company.com" style={inputStyle}/>
           </label>
           <label>
             <div className="mono" style={{ fontSize: 10, letterSpacing: '.18em', color: 'var(--t-4)', marginBottom: 6 }}>
               PASSWORD
             </div>
-            <input type="password" value={pw} onChange={e => setPw(e.target.value)} style={inputStyle}/>
+            <input type="password" value={pw} onChange={e => setPw(e.target.value)} placeholder="Enter your password" style={inputStyle}/>
           </label>
-          <button type="submit" className="btn btn-plum" style={{
+          <button type="submit" disabled={isLoading} className="btn btn-plum" style={{
             marginTop: 12, padding: '14px 18px', fontSize: 14, justifyContent: 'space-between',
+            opacity: isLoading ? 0.7 : 1, cursor: isLoading ? 'wait' : 'pointer',
           }}>
-            <span>Enter the console</span>
+            <span>{isLoading ? 'Signing in...' : 'Enter the console'}</span>
             <span style={{ fontFamily: 'var(--serif)', fontStyle: 'italic' }}>→</span>
           </button>
           <div className="mono" style={{

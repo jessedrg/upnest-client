@@ -4,6 +4,7 @@
 // Three-step (1) form (2) analyzing (3) parsed-confirm flow with a brand panel.
 
 import * as React from 'react';
+import { createClient } from '@/lib/supabase/client';
 import { emitToast } from './Toast';
 
 type LinkKind = 'website' | 'linkedin';
@@ -76,9 +77,96 @@ export function ClientSignupView({ onEnter, onBackToLogin }: {
     });
   };
 
-  const finish = () => {
-    emitToast({ kind: 'success', title: 'Welcome to upnest', body: 'Your client workspace is ready.' });
-    setTimeout(() => onEnter(), 500);
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
+
+  const finish = async () => {
+    if (!profile) return;
+    setIsSubmitting(true);
+    
+    try {
+      const supabase = createClient();
+      
+      // 1. Sign up the user with Supabase Auth
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: f.email,
+        password: f.password,
+        options: {
+          emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ??
+            `${window.location.origin}/auth/callback`,
+          data: {
+            first_name: f.firstName,
+            last_name: f.lastName,
+            role: 'client',
+          },
+        },
+      });
+      
+      if (authError) throw authError;
+      if (!authData.user) throw new Error('No user created');
+      
+      // 2. Create the client organization
+      const { data: orgData, error: orgError } = await supabase
+        .from('client_organizations')
+        .insert({
+          name: profile.name,
+          website: linkKind === 'website' ? f.website : null,
+          industry: profile.industry,
+          company_size: profile.size,
+          description: profile.tagline,
+          contact_name: `${f.firstName} ${f.lastName}`,
+          contact_email: f.email,
+        })
+        .select()
+        .single();
+      
+      if (orgError) throw orgError;
+      
+      // 3. Create user profile with client role
+      const { error: profileError } = await supabase
+        .from('user_profiles')
+        .insert({
+          id: authData.user.id,
+          first_name: f.firstName,
+          last_name: f.lastName,
+          full_name: `${f.firstName} ${f.lastName}`,
+          email: f.email,
+          role: 'client',
+          status: 'pending', // Pending until approved by admin
+        });
+      
+      if (profileError) {
+        console.error('[v0] Profile error:', profileError);
+        // Profile might be created by trigger, continue
+      }
+      
+      // 4. Link user to client organization
+      const { error: linkError } = await supabase
+        .from('client_users')
+        .insert({
+          user_id: authData.user.id,
+          organization_id: orgData.id,
+          role: 'owner', // First user is owner
+        });
+      
+      if (linkError) throw linkError;
+      
+      emitToast({ 
+        kind: 'success', 
+        title: 'Welcome to upnest', 
+        body: 'Your request has been submitted. Check your email to verify your account.' 
+      });
+      setTimeout(() => onEnter(), 500);
+      
+    } catch (error: any) {
+      console.error('[v0] Signup error:', error);
+      emitToast({ 
+        kind: 'error', 
+        title: 'Signup failed', 
+        body: error?.message || 'Something went wrong. Please try again.' 
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -218,7 +306,7 @@ export function ClientSignupView({ onEnter, onBackToLogin }: {
             )}
 
             {step === 2 && <CompanyAnalyzingPanel beats={analyzeBeats} url={url} kind={linkKind}/>}
-            {step === 3 && profile && <ParsedCompanyPanel profile={profile} onFinish={finish}/>}
+            {step === 3 && profile && <ParsedCompanyPanel profile={profile} onFinish={finish} isSubmitting={isSubmitting}/>}
           </div>
 
           <div className="rise-in d5" style={{
@@ -348,7 +436,7 @@ function CompanyAnalyzingPanel({ beats, url, kind }: {
   );
 }
 
-function ParsedCompanyPanel({ profile, onFinish }: { profile: Profile; onFinish: () => void }) {
+function ParsedCompanyPanel({ profile, onFinish, isSubmitting }: { profile: Profile; onFinish: () => void; isSubmitting: boolean }) {
   return (
     <div>
       <div style={{
@@ -433,13 +521,15 @@ function ParsedCompanyPanel({ profile, onFinish }: { profile: Profile; onFinish:
       </div>
 
       <div style={{ display: 'flex', gap: 12, marginTop: 20, alignItems: 'center' }}>
-        <button onClick={onFinish} style={{
-          flex: 1, appearance: 'none', border: 0, cursor: 'pointer',
+        <button onClick={onFinish} disabled={isSubmitting} style={{
+          flex: 1, appearance: 'none', border: 0, 
+          cursor: isSubmitting ? 'wait' : 'pointer',
           background: 'var(--ink)', color: 'var(--paper)',
           padding: '16px', borderRadius: 999,
           fontFamily: 'var(--serif)', fontSize: 18, fontStyle: 'italic',
+          opacity: isSubmitting ? 0.7 : 1,
         }}>
-          Looks right — create my workspace <span style={{ fontStyle: 'normal' }}>→</span>
+          {isSubmitting ? 'Creating workspace...' : 'Looks right — create my workspace'} <span style={{ fontStyle: 'normal' }}>→</span>
         </button>
       </div>
     </div>
